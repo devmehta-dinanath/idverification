@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { LogIn, Users, Lock } from "lucide-react";
@@ -14,17 +14,49 @@ const Landing = () => {
   const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState<"guest" | "visitor" | null>(null);
 
+  // Determine mode (kiosk / online) from URL query parameters.
+  // - Kiosk: show both Guest + Visitor entry points
+  // - Online: guest-only entry (no visitor check-in)
+  const { isKiosk, propertyExternalId } = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const modeParam = params.get("mode");
+    const kioskFlag = params.get("kiosk");
+
+    const isKioskMode =
+      modeParam === "kiosk" ||
+      kioskFlag === "true" ||
+      kioskFlag === "1";
+
+    const propertyExternalId =
+      params.get("property_external_id") ||
+      params.get("property") ||
+      undefined;
+
+    return {
+      isKiosk: isKioskMode,
+      propertyExternalId,
+    };
+  }, []);
+
   const handleStartFlow = async (flowType: "guest" | "visitor") => {
     setIsLoading(flowType);
     try {
-      const response = await api.verify(
+      const basePayload =
         flowType === "visitor"
-          ? { action: "start_visitor" }
-          : {
-            action: "start",
-            flow_type: flowType,
-          }
-      );
+          ? { action: "start_visitor" as const }
+          : ({
+              action: "start" as const,
+              flow_type: flowType,
+            });
+
+      const response = await api.verify({
+        ...basePayload,
+        // Pass property context through to backend so the session
+        // is correctly associated with the kiosk/online property.
+        ...(propertyExternalId
+          ? { property_external_id: propertyExternalId }
+          : {}),
+      } as any);
 
       const token = response.session_token || response.verify_url?.split("/").pop();
       if (token) {
@@ -112,7 +144,7 @@ const Landing = () => {
 
           {/* CTA Cards - Side by side on desktop, stacked on mobile */}
           <div className="max-w-3xl mx-auto mb-16">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={`grid grid-cols-1 ${isKiosk ? "md:grid-cols-2" : ""} gap-6`}>
               {/* Guest Check-In Card */}
               <motion.div
                 whileHover={{ scale: isLoading ? 1 : 1.03 }}
@@ -128,20 +160,23 @@ const Landing = () => {
                 <p className="text-white/80">{t("landing.startDescription")}</p>
               </motion.div>
 
-              {/* Visitor Check-In Card */}
-              <motion.div
-                whileHover={{ scale: isLoading ? 1 : 1.03 }}
-                whileTap={{ scale: isLoading ? 1 : 0.97 }}
-                className={`glass-hover rounded-3xl p-8 cursor-pointer transition-opacity ${isLoading && isLoading !== "visitor" ? "opacity-50" : ""
+              {/* Visitor Check-In Card (kiosk mode only) */}
+              {isKiosk && (
+                <motion.div
+                  whileHover={{ scale: isLoading ? 1 : 1.03 }}
+                  whileTap={{ scale: isLoading ? 1 : 0.97 }}
+                  className={`glass-hover rounded-3xl p-8 cursor-pointer transition-opacity ${
+                    isLoading && isLoading !== "visitor" ? "opacity-50" : ""
                   }`}
-                onClick={() => !isLoading && handleStartFlow("visitor")}
-              >
-                <Users className="w-16 h-16 text-white mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-white mb-2">
-                  {isLoading === "visitor" ? t("common.loading") : t("landing.visitorCheckIn")}
-                </h3>
-                <p className="text-white/80">{t("landing.visitorDescription")}</p>
-              </motion.div>
+                  onClick={() => !isLoading && handleStartFlow("visitor")}
+                >
+                  <Users className="w-16 h-16 text-white mx-auto mb-4" />
+                  <h3 className="text-2xl font-bold text-white mb-2">
+                    {isLoading === "visitor" ? t("common.loading") : t("landing.visitorCheckIn")}
+                  </h3>
+                  <p className="text-white/80">{t("landing.visitorDescription")}</p>
+                </motion.div>
+              )}
             </div>
           </div>
         </motion.div>

@@ -13,10 +13,20 @@ export type VerifyAction = "start" | "log_consent" | "update_guest" | "get_sessi
 export interface StartSessionRequest {
   action: "start";
   flow_type?: "guest" | "visitor";
+  /**
+   * Optional property context for kiosk/online variants.
+   * For kiosk, this typically comes from the device/QR configuration.
+   */
+  property_external_id?: string;
 }
 
 export interface StartVisitorRequest {
   action: "start_visitor";
+  /**
+   * Optional property context for kiosk/online variants.
+   * For kiosk, this typically comes from the device/QR configuration.
+   */
+  property_external_id?: string;
 }
 
 export interface LogConsentRequest {

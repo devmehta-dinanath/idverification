@@ -4,6 +4,9 @@ import { inferStepFromSession } from "../session";
 import { clampInt } from "../utils";
 
 export async function handleStartVisitor(req, res) {
+    const { property_external_id: bodyPropertyExternalId } = req.body || {};
+    const property_external_id = bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
+
     const token = generateToken();
     const expected_guest_count = 1;
     const verified_guest_count = 0;
@@ -16,6 +19,8 @@ export async function handleStartVisitor(req, res) {
         expected_guest_count,
         verified_guest_count,
         requires_additional_guest,
+        // Persist property context so this session is tied to a kiosk/online property.
+        property_external_id,
         extracted_info: { type: "visitor" },
         updated_at: new Date().toISOString(),
     });
@@ -33,6 +38,9 @@ export async function handleStartVisitor(req, res) {
 }
 
 export async function handleStart(req, res) {
+    const { property_external_id: bodyPropertyExternalId } = req.body || {};
+    const property_external_id = bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
+
     const token = generateToken();
     const expected_guest_count = 1;
     const verified_guest_count = 0;
@@ -45,6 +53,8 @@ export async function handleStart(req, res) {
         expected_guest_count,
         verified_guest_count,
         requires_additional_guest,
+        // Persist property context so this session is tied to a kiosk/online property.
+        property_external_id,
         updated_at: new Date().toISOString(),
     });
 

@@ -2,7 +2,7 @@
   "name": "roomquest-backend",
   "version": "1.0.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/combine-build.js && next dev",
     "build": "node scripts/combine-build.js && next build",
     "start": "next start"
   },
