@@ -77,6 +77,18 @@ const clampInt = (n: unknown, min: number, max: number) => {
   return Math.max(min, Math.min(max, x));
 };
 
+const getHomePath = () => {
+  try {
+    const storedSearch = sessionStorage.getItem("opsian_home_search") || "";
+    if (storedSearch && storedSearch.startsWith("?")) {
+      return `/${storedSearch}`;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return "/";
+};
+
 const Verify = () => {
   const { token } = useParams();
   const navigate = useNavigate();
@@ -94,6 +106,11 @@ const Verify = () => {
   });
 
   const hasLoadedRef = useRef(false);
+
+  const navigateHome = useCallback(() => {
+    const path = getHomePath();
+    navigate(path);
+  }, [navigate]);
 
   const fetchSessionWithRetry = useCallback(async (sessionToken: string, attempt = 0): Promise<boolean> => {
     console.log(`[Verify] get_session attempt ${attempt + 1} for token: ${sessionToken}`);
@@ -213,14 +230,14 @@ const Verify = () => {
           description: "The session may have expired or failed to create. Please try again.",
           variant: "destructive",
         });
-        navigate("/");
+        navigateHome();
       }
 
       setIsLoading(false);
     };
 
     loadSession();
-  }, [token, navigate, toast, fetchSessionWithRetry]);
+  }, [token, navigateHome, toast, fetchSessionWithRetry]);
 
   const updateData = (newData: Partial<VerificationData>) => {
     setData((prev) => ({ ...prev, ...newData }));
@@ -259,7 +276,7 @@ const Verify = () => {
           flowType={pendingFlowType}
           existingSessionToken={token !== "new" ? token : undefined}
           onConsent={(sessionToken) => handleConsent(sessionToken, pendingFlowType)}
-          onCancel={() => navigate("/")}
+          onCancel={navigateHome}
         />
       )}
 
@@ -318,12 +335,12 @@ const Verify = () => {
 
             {step === 4 &&
               (isVisitorFlow ? (
-                <VisitorResultsStep data={data} onHome={() => navigate("/")} />
+                <VisitorResultsStep data={data} onHome={navigateHome} />
               ) : (
                 <ResultsStep
                   data={data}
                   onRetry={() => navigate("/verify/new?flow=guest")}
-                  onHome={() => navigate("/")}
+                  onHome={navigateHome}
                 />
               ))}
           </AnimatePresence>

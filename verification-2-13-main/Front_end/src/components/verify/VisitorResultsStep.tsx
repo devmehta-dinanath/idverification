@@ -3,13 +3,15 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, Home, Clock } from "lucide-react";
 import { VerificationData } from "@/pages/Verify";
 import confetti from "canvas-confetti";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   data: VerificationData;
   onHome: () => void;
 };
+
+const COUNTDOWN_SECONDS = 45;
 
 function formatTimeHHMM(iso?: string | null) {
   if (!iso) return null;
@@ -30,6 +32,8 @@ function minutesRemaining(expiresIso?: string | null) {
 const VisitorResultsStep = ({ data, onHome }: Props) => {
   const { t } = useTranslation();
 
+  const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
+
   useEffect(() => {
     confetti({
       particleCount: 100,
@@ -37,6 +41,19 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
       origin: { y: 0.6 },
     });
   }, []);
+
+  useEffect(() => {
+    if (secondsLeft <= 0) {
+      onHome();
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [secondsLeft, onHome]);
 
   const accessCode = useMemo(() => {
     console.log("[VisitorResults] Full data object:", data);
@@ -84,6 +101,13 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
       </motion.div>
 
       <h2 className="text-4xl md:text-5xl font-thin text-white mb-4">{t("visitor.accessGranted")}</h2>
+
+      <p className="text-sm text-white/80 mb-2">
+        {t("visitor.redirectCountdown", {
+          defaultValue: "Returning to the start page in {{seconds}}s…",
+          seconds: secondsLeft,
+        })}
+      </p>
 
       {/* Time limit indicator */}
       <div className="flex flex-col items-center justify-center gap-2 mb-8">

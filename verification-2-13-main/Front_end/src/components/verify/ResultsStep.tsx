@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Home, RotateCcw } from "lucide-react";
 import { VerificationData } from "@/pages/Verify";
 import confetti from "canvas-confetti";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -13,9 +13,13 @@ type Props = {
   onHome: () => void;
 };
 
+const COUNTDOWN_SECONDS = 45;
+
 const ResultsStep = ({ data, onRetry, onHome }: Props) => {
   const isSuccess = Boolean(data.isVerified);
   const { t } = useTranslation();
+
+  const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
 
   useEffect(() => {
     if (isSuccess) {
@@ -26,6 +30,21 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
       });
     }
   }, [isSuccess]);
+
+  useEffect(() => {
+    if (!isSuccess) return;
+
+    if (secondsLeft <= 0) {
+      onHome();
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isSuccess, secondsLeft, onHome]);
 
   // ---- FIX: accept any possible key name coming back from backend/session ----
   const anyData = data as any;
@@ -67,6 +86,13 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
         </motion.div>
 
         <h2 className="text-4xl md:text-5xl font-thin text-white mb-4">{t("results.successTitle")}</h2>
+
+        <p className="text-sm text-white/80 mb-4">
+          {t("results.redirectCountdown", {
+            defaultValue: "Returning to the start page in {{seconds}}s…",
+            seconds: secondsLeft,
+          })}
+        </p>
 
         <div className="bg-white rounded-xl p-6 mb-6 shadow-lg">
           <p className="text-gray-800 text-lg mb-1">
@@ -118,8 +144,6 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
     );
   }
 
-  const score = Number(data.verificationScore || 0);
-
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -136,11 +160,6 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
       </motion.div>
 
       <h2 className="text-4xl md:text-5xl font-thin text-white mb-4">{t("results.failureTitle")}</h2>
-
-      <div className="glass rounded-2xl p-6 mb-6">
-        <div className="text-6xl font-bold text-red-400 mb-2">{(score * 100).toFixed(2)}%</div>
-        <div className="text-white/80 text-lg">{t("results.verificationScore")}</div>
-      </div>
 
       <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-6 mb-6">
         <p className="text-white text-lg mb-2">{t("results.whyFailed")}</p>

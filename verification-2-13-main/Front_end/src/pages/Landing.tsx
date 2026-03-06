@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { LogIn, Users, Lock } from "lucide-react";
@@ -36,6 +36,16 @@ const Landing = () => {
       isKiosk: isKioskMode,
       propertyExternalId,
     };
+  }, []);
+
+  // Remember the current landing page query string (e.g. kiosk mode) so that
+  // flows like /verify can return the user to the same landing configuration.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("opsian_home_search", window.location.search || "");
+    } catch {
+      // Ignore storage errors (e.g. disabled storage)
+    }
   }, []);
 
   const handleStartFlow = async (flowType: "guest" | "visitor") => {
