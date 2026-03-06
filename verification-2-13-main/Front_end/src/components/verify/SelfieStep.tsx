@@ -81,6 +81,7 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
 
   const handleConfirmUpload = async () => {
     if (!capturedImage) return;
+    if (isProcessing) return;
 
     if (!data.sessionToken) {
       onError(new Error("No session token found"));

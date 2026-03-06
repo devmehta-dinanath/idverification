@@ -84,6 +84,32 @@ export async function handleGetSession(req, res) {
         return res.status(404).json({ error: "Session not found" });
     }
 
+    // Optional inactivity timeout (DISABLED by default to avoid changing flow).
+    // Enable by setting SESSION_INACTIVITY_TIMEOUT_MINUTES to a positive integer.
+    const timeoutMinutesRaw = process.env.SESSION_INACTIVITY_TIMEOUT_MINUTES;
+    const timeoutMinutes = timeoutMinutesRaw ? parseInt(timeoutMinutesRaw, 10) : NaN;
+    if (!Number.isNaN(timeoutMinutes) && timeoutMinutes > 0) {
+        try {
+            const last = new Date(session.updated_at || session.created_at || Date.now());
+            const minutesSince = (Date.now() - last.getTime()) / (1000 * 60);
+            const terminal =
+                session.status === "verified" ||
+                session.status === "failed" ||
+                session.is_verified === true ||
+                session.current_step === "results";
+            if (!terminal && minutesSince > timeoutMinutes) {
+                return res.status(410).json({
+                    error: "Session expired",
+                    expired: true,
+                    message: "This session has been inactive for too long. Please start a new session.",
+                });
+            }
+        } catch (e) {
+            // If timestamp parsing fails, do not block the session.
+            console.warn("[get_session] inactivity timeout check failed:", e?.message || e);
+        }
+    }
+
     const current_step = inferStepFromSession(session);
     const expected = clampInt(session.expected_guest_count, 1, 10);
     const verified = clampInt(session.verified_guest_count, 0, 10);
@@ -104,6 +130,9 @@ export async function handleGetSession(req, res) {
             verified_guest_count: verified,
             requires_additional_guest: requires,
             remaining_guest_verifications: Math.max(expected - verified, 0),
+            // Helpful for multi-guest loops: "who is next?"
+            // (does not require a DB column)
+            guest_index: Math.min(verified + 1, expected),
         },
     });
 }

@@ -206,7 +206,7 @@ export async function handleUploadDocument(req, res) {
 
     const { data: sess, error: sessErr } = await supabase
         .from("demo_sessions")
-        .select("guest_name, room_number, expected_guest_count, verified_guest_count, extracted_info")
+        .select("guest_name, room_number, expected_guest_count, verified_guest_count, extracted_info, current_step, document_url, visitor_access_code, visitor_access_granted_at, visitor_access_expires_at")
         .eq("session_token", session_token)
         .single();
 
@@ -234,6 +234,30 @@ export async function handleUploadDocument(req, res) {
     const expected = clampInt(sess.expected_guest_count, 1, 10);
     const verifiedBefore = clampInt(sess.verified_guest_count, 0, 10);
     const guestIndex = clampInt(verifiedBefore + 1, 1, expected);
+
+    // ── Idempotency / duplicate submission guard ─────────────────────────────
+    // NOTE: document_url is stored at session-level (overwritten per guest in current design),
+    // so we use extracted_info.guest_index + current_step to determine if THIS guest's doc
+    // was already uploaded.
+    const lastDocGuestIndex = clampInt(sess?.extracted_info?.guest_index, 0, 10);
+    const alreadyAtSelfieForThisGuest =
+        sess.current_step === "selfie" &&
+        Boolean(sess.document_url) &&
+        lastDocGuestIndex === guestIndex;
+    const alreadyDone =
+        sess.current_step === "results" ||
+        sess.status === "verified" ||
+        sess.is_verified === true;
+    if (alreadyAtSelfieForThisGuest || alreadyDone) {
+        return res.json({
+            success: true,
+            guest_index: guestIndex,
+            already_uploaded: true,
+            visitor_access_code: sess.visitor_access_code || null,
+            visitor_access_granted_at: sess.visitor_access_granted_at || null,
+            visitor_access_expires_at: sess.visitor_access_expires_at || null,
+        });
+    }
 
     const base64Data = normalizeBase64(image_data);
     const imageBuffer = Buffer.from(base64Data, "base64");
@@ -273,7 +297,9 @@ export async function handleUploadDocument(req, res) {
 
     const documentUrl = AWS_AVAILABLE ? `s3://${BUCKET}/${s3Key}` : `dev://local/${s3Key}`;
 
-    await supabase
+    // Only advance to selfie if we're currently at document step.
+    // If a duplicate request arrives after we already advanced, don't regress flow.
+    const { data: updatedRows, error: updErr } = await supabase
         .from("demo_sessions")
         .update({
             status: "document_uploaded",
@@ -288,7 +314,24 @@ export async function handleUploadDocument(req, res) {
             },
             updated_at: new Date().toISOString(),
         })
-        .eq("session_token", session_token);
+        .eq("session_token", session_token)
+        .eq("current_step", "document")
+        .select("session_token");
+
+    if (updErr) {
+        console.warn("[upload_document] update failed (continuing as idempotent):", updErr.message);
+    } else if (!updatedRows || updatedRows.length === 0) {
+        // Someone else already advanced the step (or session is not in document step).
+        // Treat as idempotent success.
+        return res.json({
+            success: true,
+            guest_index: guestIndex,
+            already_uploaded: true,
+            visitor_access_code: sess.visitor_access_code || null,
+            visitor_access_granted_at: sess.visitor_access_granted_at || null,
+            visitor_access_expires_at: sess.visitor_access_expires_at || null,
+        });
+    }
 
     const isVisitorSession = sess.extracted_info?.type === "visitor" || sess.room_number === "VISITOR";
     let visitorCodeData = null;
@@ -353,6 +396,7 @@ export async function handleUploadDocument(req, res) {
     return res.json({
         success: true,
         guest_index: guestIndex,
+        already_uploaded: false,
         visitor_access_code: visitorCodeData?.visitor_access_code,
         visitor_access_granted_at: visitorCodeData?.visitor_access_granted_at,
         visitor_access_expires_at: visitorCodeData?.visitor_access_expires_at,
@@ -377,6 +421,38 @@ export async function handleVerifyFace(req, res) {
     const verifiedBefore = clampInt(session.verified_guest_count, 0, 10);
     const guestIndex = clampInt(verifiedBefore + 1, 1, expected);
     const docKey = `demo/${session_token}/document_${guestIndex}.jpg`;
+
+    // ── Idempotency / duplicate submission guard ─────────────────────────────
+    // If we're already beyond selfie step, don't do AWS work again.
+    const terminal =
+        session.current_step === "results" ||
+        session.status === "verified" ||
+        session.is_verified === true ||
+        verifiedBefore >= expected;
+
+    if (terminal) {
+        return res.json({
+            success: true,
+            guest_verified: true,
+            next_step: "results",
+            already_verified: true,
+            access_code: session.room_access_code || null,
+            room_access_code: session.room_access_code || null,
+        });
+    }
+
+    // If backend expects the NEXT guest's document, but we received verify_face,
+    // this is very likely a duplicate/late retry from the previous guest.
+    if (session.current_step === "document" && verifiedBefore > 0) {
+        return res.json({
+            success: true,
+            guest_verified: true,
+            next_step: "document",
+            already_verified: true,
+            access_code: session.room_access_code || null,
+            room_access_code: session.room_access_code || null,
+        });
+    }
 
     let similarity, livenessScore, verificationScore, guest_verified, isLive;
     const selfieBase64 = normalizeBase64(selfie_data);
@@ -425,20 +501,37 @@ export async function handleVerifyFace(req, res) {
     const requiresAdditionalGuest = verifiedAfter < expected;
     const next_step = guest_verified ? (requiresAdditionalGuest ? "document" : "results") : "selfie";
 
-    await supabase.from("demo_sessions").update({
-        status: guest_verified ? (requiresAdditionalGuest ? "partial_verified" : "verified") : "failed",
-        current_step: next_step,
-        selfie_url: AWS_AVAILABLE ? `s3://${BUCKET}/${selfieKey}` : `dev://local/${selfieKey}`,
-        is_verified: verifiedAfter >= expected,
-        verification_score: verificationScore,
-        liveness_score: livenessScore,
-        face_match_score: similarity,
-        verified_guest_count: verifiedAfter,
-        updated_at: new Date().toISOString(),
-    }).eq("session_token", session_token);
+    // Optimistic locking: only apply this transition if verified_guest_count is still what we read.
+    // Prevents double-increment from duplicate/concurrent submissions.
+    const selfieUrl = AWS_AVAILABLE ? `s3://${BUCKET}/${selfieKey}` : `dev://local/${selfieKey}`;
+    const { data: updated, error: updateErr } = await supabase
+        .from("demo_sessions")
+        .update({
+            status: guest_verified ? (requiresAdditionalGuest ? "partial_verified" : "verified") : "failed",
+            current_step: next_step,
+            selfie_url: selfieUrl,
+            is_verified: verifiedAfter >= expected,
+            verification_score: verificationScore,
+            liveness_score: livenessScore,
+            face_match_score: similarity,
+            verified_guest_count: verifiedAfter,
+            updated_at: new Date().toISOString(),
+        })
+        .eq("session_token", session_token)
+        .eq("verified_guest_count", verifiedBefore)
+        .select("session_token, verified_guest_count, current_step, requires_additional_guest, is_verified, room_access_code");
+
+    const updateApplied = !updateErr && updated && updated.length > 0;
+    if (updateErr) {
+        console.warn("[verify_face] update failed (continuing):", updateErr.message);
+    }
 
     let access_code = null;
     if (verifiedAfter >= expected) {
+        // If a prior call already issued a code, reuse it.
+        if (session.room_access_code) {
+            access_code = session.room_access_code;
+        }
         // Fetch Cloudbeds IDs from session for door lock lookup
         let cb_prop_id_for_code = null;
         let cb_res_id_for_code = null;
@@ -452,26 +545,29 @@ export async function handleVerifyFace(req, res) {
             cb_res_id_for_code = cbSess?.cloudbeds_reservation_id;
         } catch (_) { /* columns may not exist */ }
 
-        access_code = await getAccessCode({
-            propertyID: cb_prop_id_for_code,
-            roomNumber: session.room_number,
-            reservationId: cb_res_id_for_code,
-        });
-        if (access_code) {
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
-            await supabase.from("demo_sessions").update({
-                room_access_code: access_code,
-                visitor_access_granted_at: now.toISOString(),
-                visitor_access_expires_at: expiresAt.toISOString(),
-            }).eq("session_token", session_token);
+        if (!access_code) {
+            access_code = await getAccessCode({
+                propertyID: cb_prop_id_for_code,
+                roomNumber: session.room_number,
+                reservationId: cb_res_id_for_code,
+            });
+            if (access_code) {
+                const now = new Date();
+                const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
+                await supabase.from("demo_sessions").update({
+                    room_access_code: access_code,
+                    visitor_access_granted_at: now.toISOString(),
+                    visitor_access_expires_at: expiresAt.toISOString(),
+                }).eq("session_token", session_token);
+            }
         }
     }
 
     // ── Push verification result to Cloudbeds as a reservation note (best-effort) ──
+    // Only push a Cloudbeds note if we actually applied the update (avoid duplicates).
     const cb_res_id = session.cloudbeds_reservation_id;
     const cb_prop_id = session.cloudbeds_property_id;
-    if (cb_res_id && cb_prop_id) {
+    if (updateApplied && cb_res_id && cb_prop_id) {
         try {
             const noteText = [
                 `=== ID Verification Result ===`,
@@ -489,6 +585,18 @@ export async function handleVerifyFace(req, res) {
         } catch (cbErr) {
             console.warn("[verify_face] Cloudbeds note push failed (non-fatal):", cbErr.message);
         }
+    }
+
+    // If we lost the optimistic lock, treat as idempotent success and let the client re-fetch session.
+    if (!updateApplied && guest_verified) {
+        return res.json({
+            success: true,
+            guest_verified: true,
+            next_step: session.requires_additional_guest ? "document" : "results",
+            already_verified: true,
+            access_code: session.room_access_code || access_code,
+            room_access_code: session.room_access_code || access_code,
+        });
     }
 
     return res.json({ success: true, guest_verified, next_step, access_code, room_access_code: access_code });

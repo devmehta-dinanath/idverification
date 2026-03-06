@@ -57,6 +57,7 @@ const DocumentStep = ({ data, updateData, onNext, onBack, onError }: Props) => {
 
   const handleConfirmUpload = async () => {
     if (!capturedImage) return;
+    if (isProcessing) return;
 
     if (!data.sessionToken) {
       onError(new Error("No session token found"));

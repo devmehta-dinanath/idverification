@@ -71,6 +71,12 @@ const stepFromBackend = (step?: string) => {
   }
 };
 
+const clampInt = (n: unknown, min: number, max: number) => {
+  const x = typeof n === "number" ? n : typeof n === "string" ? parseInt(n, 10) : NaN;
+  if (Number.isNaN(x)) return min;
+  return Math.max(min, Math.min(max, x));
+};
+
 const Verify = () => {
   const { token } = useParams();
   const navigate = useNavigate();
@@ -101,6 +107,9 @@ const Verify = () => {
       console.log("[Verify] get_session success:", res);
 
       const session = res.session;
+      const expected = clampInt((session as any)?.expected_guest_count, 1, 10);
+      const verified = clampInt((session as any)?.verified_guest_count, 0, 10);
+      const computedGuestIndex = Math.min(verified + 1, expected);
 
       const params = new URLSearchParams(window.location.search);
       const urlFlow = params.get("flow");
@@ -130,7 +139,7 @@ const Verify = () => {
         verificationScore: session.verification_score,
         expectedGuestCount: session.expected_guest_count,
         verifiedGuestCount: session.verified_guest_count,
-        guestIndex: session.guest_index,
+        guestIndex: typeof session.guest_index === "number" ? session.guest_index : computedGuestIndex,
         requiresAdditionalGuest: session.requires_additional_guest,
         flowType,
 
@@ -159,6 +168,7 @@ const Verify = () => {
       setPendingFlowType(flowType);
 
       setShowConsent(session.consent_given !== true);
+      // Always trust backend step on refresh/navigation.
       setStep(stepFromBackend(session.current_step));
       return true;
     } catch (err: any) {
