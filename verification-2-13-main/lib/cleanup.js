@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const s3 = new S3Client({ region: process.env.AWS_REGION });
+const s3 = new S3Client({ region: process.env.S3_REGION || process.env.AWS_REGION || "ap-southeast-7" });
 const BUCKET = process.env.S3_BUCKET_NAME;
 
 export async function deleteOldSessionsAndImages() {
