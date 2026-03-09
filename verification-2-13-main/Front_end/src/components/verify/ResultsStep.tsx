@@ -1,4 +1,4 @@
-// ResultsStep.tsx (FIXED: shows door code + room using all backend key variants)
+// ResultsStep.tsx – shows door code + room on success screen
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Home, RotateCcw } from "lucide-react";
@@ -129,6 +129,8 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
             </p>
           </motion.div>
         )}
+
+        {/* ── table and export button removed: data saves to Google Sheets on the backend ── */}
 
         <div className="glass rounded-xl p-4 mb-8">
           <p className="text-xs text-white/70 text-center leading-relaxed">{t("results.deletionNote")}</p>

@@ -94,6 +94,7 @@ export async function handleUpdateGuest(req, res) {
         console.warn("[update_guest] Door lock code fetch failed (non-fatal):", err?.message);
     }
 
+    // Core payload – only columns guaranteed to exist in the DB
     const updatePayload = {
         guest_name,
         room_number: cbResult.roomNumber || bookingValue,
@@ -120,6 +121,21 @@ export async function handleUpdateGuest(req, res) {
         return res.status(500).json({ error: "Failed to save guest info" });
     }
 
+    // Attempt to persist extended Cloudbeds columns (non-fatal if columns don't exist yet)
+    const extendedPayload = {
+        room_type_name: cbResult.roomTypeName || null,
+        cloudbeds_check_in: cbResult.checkIn || null,
+        cloudbeds_check_out: cbResult.checkOut || null,
+        cloudbeds_guest_details: cbResult.guestDetails || null,
+    };
+    const { error: extErr } = await supabase
+        .from("demo_sessions")
+        .update(extendedPayload)
+        .eq("session_token", session_token);
+    if (extErr) {
+        console.warn("[update_guest] Extended columns not saved (run setup.sql migrations):", extErr.message);
+    }
+
     return res.json({
         success: true,
         adults: adultsFromCB,
@@ -128,6 +144,13 @@ export async function handleUpdateGuest(req, res) {
         verified_guest_count: verified,
         requires_additional_guest: verified < expectedToSet,
         remaining_guest_verifications: Math.max(expectedToSet - verified, 0),
+        // Pass Cloudbeds details through response so frontend has them even without DB columns
+        physical_room,
+        room_type_name: cbResult.roomTypeName || null,
+        check_in: cbResult.checkIn || null,
+        check_out: cbResult.checkOut || null,
+        cloudbeds_guest_details: cbResult.guestDetails || null,
+        room_access_code: room_access_code || null,
     });
 }
 

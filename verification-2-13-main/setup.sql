@@ -19,6 +19,10 @@ ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_reservation_id text
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_property_id text;
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS physical_room text;
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS room_access_code text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS room_type_name text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_check_in text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_check_out text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_guest_details jsonb;
 
 -- These columns store the Cloudbeds reservation reference so that
 -- document uploads and verification notes can be pushed back to the PMS.

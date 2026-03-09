@@ -56,6 +56,10 @@ export type VerificationData = {
 
   physicalRoom?: string;
   roomAccessCode?: string;
+  roomTypeName?: string;
+  checkIn?: string;
+  checkOut?: string;
+  cloudbedsGuestDetails?: Record<string, string>;
 };
 
 const stepFromBackend = (step?: string) => {
@@ -180,6 +184,10 @@ const Verify = () => {
 
         physicalRoom: (session as any).physical_room || undefined,
         roomAccessCode: (session as any).room_access_code || (session as any).roomAccessCode || undefined,
+        roomTypeName: (session as any).room_type_name || undefined,
+        checkIn: (session as any).cloudbeds_check_in || undefined,
+        checkOut: (session as any).cloudbeds_check_out || undefined,
+        cloudbedsGuestDetails: (session as any).cloudbeds_guest_details || undefined,
       });
 
       setPendingFlowType(flowType);

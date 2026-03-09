@@ -4,7 +4,8 @@ import { normalizeBase64, clampInt, streamToBuffer } from "../utils";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekognition";
 import { getAccessCode } from "../access-codes";
-import { getGuests, putGuestDocument, addReservationNote } from "../cloudbeds";
+import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation } from "../cloudbeds";
+import { appendGuestRow } from "../google-sheets";
 
 // ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
 const AWS_AVAILABLE = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
@@ -585,6 +586,53 @@ export async function handleVerifyFace(req, res) {
             console.log(`[verify_face] Pushed verification note to Cloudbeds reservation ${cb_res_id}`);
         } catch (cbErr) {
             console.warn("[verify_face] Cloudbeds note push failed (non-fatal):", cbErr.message);
+        }
+    }
+
+    // ── Append guest row to Google Sheet when all guests are verified (best-effort) ──
+    if (updateApplied && verifiedAfter >= expected) {
+        try {
+            // Re-fetch from Cloudbeds using reservation ID (not room_number which is now the
+            // physical room "404") to get fresh guest details: nationality, phone, email, dates.
+            let cbData = null;
+            const cbResId = session.cloudbeds_reservation_id;
+            if (cbResId) {
+                try {
+                    cbData = await lookupGuestReservation(session.guest_name, cbResId);
+                } catch (cbErr) {
+                    console.warn("[verify_face] Cloudbeds re-fetch for sheet failed:", cbErr.message);
+                }
+            }
+
+            const gd = cbData?.guestDetails || session.cloudbeds_guest_details || {};
+            // Textract OCR results take precedence over Cloudbeds for passport/DOB/nationality
+            const textract = session.extracted_info?.textract || {};
+            const nameParts = (session.guest_name || "").split(/\s+/);
+            const cbFirst = gd.firstName || "";
+            const firstParts = cbFirst ? cbFirst.split(/\s+/) : nameParts;
+            const firstName = textract.first_name || firstParts[0] || "";
+            const middleName = textract.middle_name || (firstParts.length > 1 ? firstParts.slice(1).join(" ") : "");
+            const lastName = textract.last_name || gd.lastName || nameParts.slice(1).join(" ") || "";
+
+            await appendGuestRow({
+                firstName,
+                middleName,
+                lastName,
+                gender: gd.gender || textract.sex || "",
+                passport: textract.document_number || gd.documentNumber || "",
+                nationality: textract.nationality || gd.country || "",
+                birthDate: textract.date_of_birth || gd.birthdate || "",
+                startDate: cbData?.checkIn || session.cloudbeds_check_in || "",
+                endDate: cbData?.checkOut || session.cloudbeds_check_out || "",
+                room: cbData?.roomName || cbData?.roomNumber || session.physical_room || session.room_number || "",
+                roomType: cbData?.roomTypeName || session.room_type_name || "",
+                phone: gd.phone || gd.guestPhone || "",
+                email: gd.email || gd.guestEmail || "",
+                verifiedAt: new Date().toISOString(),
+                verificationScore,
+            });
+        } catch (sheetErr) {
+            console.warn("[verify_face] Google Sheets append failed (non-fatal):", sheetErr.message);
         }
     }
 
