@@ -8,9 +8,20 @@ import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation
 import { appendGuestRow } from "../google-sheets";
 
 // ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
-const AWS_AVAILABLE = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const AWS_AVAILABLE = Boolean(AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY);
+
 if (!AWS_AVAILABLE) {
     console.warn("⚠️  [DEV MODE] AWS credentials not found — Rekognition/Textract/S3 will be bypassed with mock data.");
+    console.warn("   AWS_ACCESS_KEY_ID:", AWS_ACCESS_KEY_ID ? `✅ Set (${AWS_ACCESS_KEY_ID.substring(0, 8)}...)` : "❌ Missing");
+    console.warn("   AWS_SECRET_ACCESS_KEY:", AWS_SECRET_ACCESS_KEY ? "✅ Set" : "❌ Missing");
+} else {
+    console.log("✅ AWS credentials loaded — Textract/Rekognition/S3 enabled");
+    console.log("   S3_REGION:", process.env.S3_REGION || process.env.AWS_REGION || "ap-southeast-7 (default)");
+    console.log("   REKOGNITION_REGION:", process.env.REKOGNITION_REGION || "ap-southeast-1 (default)");
+    console.log("   TEXTRACT_REGION:", process.env.TEXTRACT_REGION || "ap-southeast-1 (default)");
+    console.log("   S3_BUCKET_NAME:", process.env.S3_BUCKET_NAME || "⚠️  Not set");
 }
 
 export async function handleValidateDocument(req, res) {
@@ -266,14 +277,20 @@ export async function handleUploadDocument(req, res) {
 
     // ── S3 upload (skip in dev mode) ─────────────────────────────────────────
     if (AWS_AVAILABLE) {
-        await s3.send(
-            new PutObjectCommand({
-                Bucket: BUCKET,
-                Key: s3Key,
-                Body: imageBuffer,
-                ContentType: "image/jpeg",
-            })
-        );
+        console.log(`[upload_document] Uploading document to S3: ${s3Key} (${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+        try {
+            await s3.send(
+                new PutObjectCommand({
+                    Bucket: BUCKET,
+                    Key: s3Key,
+                    Body: imageBuffer,
+                    ContentType: "image/jpeg",
+                })
+            );
+            console.log(`[upload_document] ✅ Document uploaded to S3 successfully`);
+        } catch (s3Err) {
+            console.error(`[upload_document] ❌ S3 upload failed:`, s3Err?.message || s3Err);
+        }
     } else {
         console.log(`[DEV MODE] upload_document → skipping S3 upload for ${s3Key}`);
     }
@@ -363,7 +380,20 @@ export async function handleUploadDocument(req, res) {
     }
 
     if (AWS_AVAILABLE) {
+        console.log(`[upload_document] Starting Textract OCR for guest ${guestIndex} (async, timeout: 15s)...`);
         runTextractAnalyzeIdWithTimeout(imageBuffer, 15000).then(async (result) => {
+            if (result.ok) {
+                console.log(`[upload_document] ✅ Textract OCR completed successfully for guest ${guestIndex}`);
+                console.log(`[upload_document] Extracted fields:`, {
+                    name: result.data?.full_name || `${result.data?.first_name || ""} ${result.data?.last_name || ""}`.trim(),
+                    document_number: result.data?.document_number || "N/A",
+                    date_of_birth: result.data?.date_of_birth || "N/A",
+                    nationality: result.data?.nationality || "N/A",
+                });
+            } else {
+                console.warn(`[upload_document] ⚠️  Textract OCR failed for guest ${guestIndex}:`, result.error);
+            }
+
             let extractedInfoUpdate = {
                 text: result.ok ? "Textract success" : "Textract failed",
                 textract_ok: result.ok,
@@ -386,6 +416,8 @@ export async function handleUploadDocument(req, res) {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("session_token", session_token);
+        }).catch((err) => {
+            console.error(`[upload_document] ❌ Textract OCR error for guest ${guestIndex}:`, err?.message || err);
         });
     } else {
         console.log("[DEV MODE] upload_document → skipping Textract OCR");
