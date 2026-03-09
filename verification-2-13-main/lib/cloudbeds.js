@@ -227,44 +227,74 @@ export async function lookupGuestReservation(guestName, bookingRef) {
             // Debug: log FULL raw resData to identify exactly which fields Cloudbeds returns
             console.log(`[cloudbeds] FULL resData for ${resData.reservationID}:`, JSON.stringify(resData, null, 2));
 
-            // Extract from every possible Cloudbeds room field variant
-            const roomsArr = Array.isArray(resData.rooms) ? resData.rooms : [];
-            const roomAssArr = Array.isArray(resData.roomAssignments) ? resData.roomAssignments : [];
-            const firstRoom = roomsArr[0] || roomAssArr[0] || null;
+            // ── Extract room info from Cloudbeds nested structures ──────────
+            // Cloudbeds nests room data inside guestList{} and assigned[] arrays,
+            // NOT at the top level.
+            const guestListValues = resData.guestList ? Object.values(resData.guestList) : [];
+            const mainGuest = guestListValues.find((g) => g.isMainGuest) || guestListValues[0] || null;
+            const assignedArr = Array.isArray(resData.assigned) ? resData.assigned : [];
+            const firstAssigned = assignedArr[0] || null;
+            const guestRooms = mainGuest?.rooms || [];
+            const firstGuestRoom = Array.isArray(guestRooms) ? guestRooms[0] : null;
 
             const roomNumber =
                 resData.roomNumber ||
                 resData.assignedRoom ||
-                resData.assignedRoomID ||
-                resData.roomID ||
-                firstRoom?.roomID ||
-                firstRoom?.room_id ||
-                firstRoom?.id ||
+                mainGuest?.roomName ||
+                firstAssigned?.roomName ||
+                firstGuestRoom?.roomName ||
+                mainGuest?.roomID ||
+                firstAssigned?.roomID ||
                 null;
 
             const roomName =
                 resData.assignedRoomName ||
                 resData.roomName ||
-                firstRoom?.roomName ||
-                firstRoom?.room_name ||
-                firstRoom?.name ||
-                resData.roomTypeName ||
-                firstRoom?.roomTypeName ||
-                resData.assignedRoom ||
+                mainGuest?.roomName ||
+                firstAssigned?.roomName ||
+                firstGuestRoom?.roomName ||
                 null;
+
+            const roomTypeName =
+                mainGuest?.roomTypeName ||
+                firstAssigned?.roomTypeName ||
+                firstGuestRoom?.roomTypeName ||
+                null;
+
+            console.log(`[cloudbeds] Resolved room: number=${roomNumber}, name=${roomName}, type=${roomTypeName}`);
+
+            // ── Extract guest details for downstream use (CSV export, TM30) ──
+            const guestDetails = {
+                firstName: mainGuest?.guestFirstName || resData.firstName || "",
+                lastName: mainGuest?.guestLastName || resData.lastName || "",
+                gender: mainGuest?.guestGender || "",
+                email: mainGuest?.guestEmail || resData.guestEmail || "",
+                phone: mainGuest?.guestPhone || mainGuest?.guestCellPhone || "",
+                country: mainGuest?.guestCountry || "",
+                birthdate: mainGuest?.guestBirthdate || "",
+                documentType: mainGuest?.guestDocumentType || "",
+                documentNumber: mainGuest?.guestDocumentNumber || "",
+                documentIssueDate: mainGuest?.guestDocumentIssueDate || "",
+                documentIssuingCountry: mainGuest?.guestDocumentIssuingCountry || "",
+                documentExpirationDate: mainGuest?.guestDocumentExpirationDate || "",
+            };
+
             console.log(`[cloudbeds] Reservation found: ${resData.reservationID} on prop ${propertyID}`);
             return {
                 found: true,
                 propertyID,
                 reservationId: resData.reservationID,
                 guestName: cbGuestName,
-                adults: Number(resData.adults || 1),
-                children: Number(resData.children || 0),
+                adults: Number(resData.adults || firstAssigned?.adults || 1),
+                children: Number(resData.children || firstAssigned?.children || 0),
                 roomNumber,
                 roomName,
+                roomTypeName,
                 checkIn: resData.startDate,
                 checkOut: resData.endDate,
                 status: resData.status,
+                source: resData.source || "",
+                guestDetails,
             };
         } catch (err) {
             console.error(`[cloudbeds] lookupGuestReservation failed for property ${propertyID}:`, err.message);

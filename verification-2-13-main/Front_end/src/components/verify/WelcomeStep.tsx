@@ -40,12 +40,23 @@ const WelcomeStep = ({ data, updateData, onNext, onError }: Props) => {
     try {
       // Persist step 1 so refresh resumes to document step
       // Backend accepts booking_ref OR room_number; we send booking_ref for clarity
-      await api.verify({
+      const res = await api.verify({
         action: "update_guest",
         session_token: data.sessionToken,
         guest_name: data.guestName,
         booking_ref: data.roomNumber, // using roomNumber field as booking ref for now
       } as any);
+
+      // Merge Cloudbeds details returned by backend into data state
+      const r = res as any;
+      updateData({
+        physicalRoom: r.physical_room || undefined,
+        roomTypeName: r.room_type_name || undefined,
+        checkIn: r.check_in || undefined,
+        checkOut: r.check_out || undefined,
+        roomAccessCode: r.room_access_code || undefined,
+        cloudbedsGuestDetails: r.cloudbeds_guest_details || undefined,
+      });
 
       // Move forward only if save succeeded
       onNext();

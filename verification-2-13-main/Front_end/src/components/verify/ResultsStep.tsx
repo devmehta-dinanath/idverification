@@ -1,4 +1,4 @@
-// ResultsStep.tsx (FIXED: shows door code + room using all backend key variants)
+// ResultsStep.tsx – shows door code + room on success screen
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Home, RotateCcw } from "lucide-react";

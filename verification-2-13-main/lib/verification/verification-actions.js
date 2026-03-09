@@ -4,12 +4,24 @@ import { normalizeBase64, clampInt, streamToBuffer } from "../utils";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekognition";
 import { getAccessCode } from "../access-codes";
-import { getGuests, putGuestDocument, addReservationNote } from "../cloudbeds";
+import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation } from "../cloudbeds";
+import { appendGuestRow } from "../google-sheets";
 
 // ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
-const AWS_AVAILABLE = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const AWS_AVAILABLE = Boolean(AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY);
+
 if (!AWS_AVAILABLE) {
     console.warn("⚠️  [DEV MODE] AWS credentials not found — Rekognition/Textract/S3 will be bypassed with mock data.");
+    console.warn("   AWS_ACCESS_KEY_ID:", AWS_ACCESS_KEY_ID ? `✅ Set (${AWS_ACCESS_KEY_ID.substring(0, 8)}...)` : "❌ Missing");
+    console.warn("   AWS_SECRET_ACCESS_KEY:", AWS_SECRET_ACCESS_KEY ? "✅ Set" : "❌ Missing");
+} else {
+    console.log("✅ AWS credentials loaded — Textract/Rekognition/S3 enabled");
+    console.log("   S3_REGION:", process.env.S3_REGION || process.env.AWS_REGION || "ap-southeast-7 (default)");
+    console.log("   REKOGNITION_REGION:", process.env.REKOGNITION_REGION || "ap-southeast-1 (default)");
+    console.log("   TEXTRACT_REGION:", process.env.TEXTRACT_REGION || "ap-southeast-1 (default)");
+    console.log("   S3_BUCKET_NAME:", process.env.S3_BUCKET_NAME || "⚠️  Not set");
 }
 
 export async function handleValidateDocument(req, res) {
@@ -265,14 +277,20 @@ export async function handleUploadDocument(req, res) {
 
     // ── S3 upload (skip in dev mode) ─────────────────────────────────────────
     if (AWS_AVAILABLE) {
-        await s3.send(
-            new PutObjectCommand({
-                Bucket: BUCKET,
-                Key: s3Key,
-                Body: imageBuffer,
-                ContentType: "image/jpeg",
-            })
-        );
+        console.log(`[upload_document] Uploading document to S3: ${s3Key} (${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+        try {
+            await s3.send(
+                new PutObjectCommand({
+                    Bucket: BUCKET,
+                    Key: s3Key,
+                    Body: imageBuffer,
+                    ContentType: "image/jpeg",
+                })
+            );
+            console.log(`[upload_document] ✅ Document uploaded to S3 successfully`);
+        } catch (s3Err) {
+            console.error(`[upload_document] ❌ S3 upload failed:`, s3Err?.message || s3Err);
+        }
     } else {
         console.log(`[DEV MODE] upload_document → skipping S3 upload for ${s3Key}`);
     }
@@ -362,7 +380,20 @@ export async function handleUploadDocument(req, res) {
     }
 
     if (AWS_AVAILABLE) {
+        console.log(`[upload_document] Starting Textract OCR for guest ${guestIndex} (async, timeout: 15s)...`);
         runTextractAnalyzeIdWithTimeout(imageBuffer, 15000).then(async (result) => {
+            if (result.ok) {
+                console.log(`[upload_document] ✅ Textract OCR completed successfully for guest ${guestIndex}`);
+                console.log(`[upload_document] Extracted fields:`, {
+                    name: result.data?.full_name || `${result.data?.first_name || ""} ${result.data?.last_name || ""}`.trim(),
+                    document_number: result.data?.document_number || "N/A",
+                    date_of_birth: result.data?.date_of_birth || "N/A",
+                    nationality: result.data?.nationality || "N/A",
+                });
+            } else {
+                console.warn(`[upload_document] ⚠️  Textract OCR failed for guest ${guestIndex}:`, result.error);
+            }
+
             let extractedInfoUpdate = {
                 text: result.ok ? "Textract success" : "Textract failed",
                 textract_ok: result.ok,
@@ -385,6 +416,8 @@ export async function handleUploadDocument(req, res) {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("session_token", session_token);
+        }).catch((err) => {
+            console.error(`[upload_document] ❌ Textract OCR error for guest ${guestIndex}:`, err?.message || err);
         });
     } else {
         console.log("[DEV MODE] upload_document → skipping Textract OCR");
@@ -585,6 +618,53 @@ export async function handleVerifyFace(req, res) {
             console.log(`[verify_face] Pushed verification note to Cloudbeds reservation ${cb_res_id}`);
         } catch (cbErr) {
             console.warn("[verify_face] Cloudbeds note push failed (non-fatal):", cbErr.message);
+        }
+    }
+
+    // ── Append guest row to Google Sheet when all guests are verified (best-effort) ──
+    if (updateApplied && verifiedAfter >= expected) {
+        try {
+            // Re-fetch from Cloudbeds using reservation ID (not room_number which is now the
+            // physical room "404") to get fresh guest details: nationality, phone, email, dates.
+            let cbData = null;
+            const cbResId = session.cloudbeds_reservation_id;
+            if (cbResId) {
+                try {
+                    cbData = await lookupGuestReservation(session.guest_name, cbResId);
+                } catch (cbErr) {
+                    console.warn("[verify_face] Cloudbeds re-fetch for sheet failed:", cbErr.message);
+                }
+            }
+
+            const gd = cbData?.guestDetails || session.cloudbeds_guest_details || {};
+            // Textract OCR results take precedence over Cloudbeds for passport/DOB/nationality
+            const textract = session.extracted_info?.textract || {};
+            const nameParts = (session.guest_name || "").split(/\s+/);
+            const cbFirst = gd.firstName || "";
+            const firstParts = cbFirst ? cbFirst.split(/\s+/) : nameParts;
+            const firstName = textract.first_name || firstParts[0] || "";
+            const middleName = textract.middle_name || (firstParts.length > 1 ? firstParts.slice(1).join(" ") : "");
+            const lastName = textract.last_name || gd.lastName || nameParts.slice(1).join(" ") || "";
+
+            await appendGuestRow({
+                firstName,
+                middleName,
+                lastName,
+                gender: gd.gender || textract.sex || "",
+                passport: textract.document_number || gd.documentNumber || "",
+                nationality: textract.nationality || gd.country || "",
+                birthDate: textract.date_of_birth || gd.birthdate || "",
+                startDate: cbData?.checkIn || session.cloudbeds_check_in || "",
+                endDate: cbData?.checkOut || session.cloudbeds_check_out || "",
+                room: cbData?.roomName || cbData?.roomNumber || session.physical_room || session.room_number || "",
+                roomType: cbData?.roomTypeName || session.room_type_name || "",
+                phone: gd.phone || gd.guestPhone || "",
+                email: gd.email || gd.guestEmail || "",
+                verifiedAt: new Date().toISOString(),
+                verificationScore,
+            });
+        } catch (sheetErr) {
+            console.warn("[verify_face] Google Sheets append failed (non-fatal):", sheetErr.message);
         }
     }
 
