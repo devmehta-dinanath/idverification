@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS cloudbeds_tokens (
 -- Run these if the demo_sessions table already exists:
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_reservation_id text;
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_property_id text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS physical_room text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS room_access_code text;
 
 -- These columns store the Cloudbeds reservation reference so that
 -- document uploads and verification notes can be pushed back to the PMS.

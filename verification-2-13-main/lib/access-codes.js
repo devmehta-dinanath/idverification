@@ -1,25 +1,38 @@
 import { supabase } from "./supabase";
 import { getDoorLockAccessCode, getVisitorAccessCode } from "./cloudbeds";
+import { isConfigured as isTTLockConfigured, getOrCreateVisitorPasscode } from "./ttlock";
 
 /**
- * Get a door access code. Tries Cloudbeds Door Locks API first,
+ * Get a door access code. Tries TTLock (if configured) then Cloudbeds Door Locks API,
  * then falls back to the Supabase door_code_schedule table.
  *
- * For visitors (isVisitor=true), searches ALL Cloudbeds properties for any active code.
- * For guests, searches the specific property/room.
+ * For visitors (isVisitor=true): TTLock creates a temp passcode, else Cloudbeds, else schedule.
+ * For guests: Cloudbeds for property/room, else schedule.
  *
  * @param {Object} options
  * @param {string}  [options.propertyID]    - Cloudbeds property ID
  * @param {string}  [options.roomNumber]    - Room number to match in Cloudbeds
  * @param {string}  [options.reservationId] - Cloudbeds reservation ID (optional)
- * @param {boolean} [options.isVisitor]     - If true, search all properties for a visitor code
+ * @param {boolean} [options.isVisitor]     - If true, search for a visitor code (TTLock or Cloudbeds)
  * @returns {string|null} - The access code, or null if none found
  */
 export async function getAccessCode({ propertyID, roomNumber, reservationId, isVisitor } = {}) {
-    // ── 1a. VISITOR: search ALL Cloudbeds properties for any active door code ──
+    // ── 1a. VISITOR: try TTLock first (create temp passcode), then Cloudbeds ──
     if (isVisitor) {
+        if (isTTLockConfigured()) {
+            try {
+                console.log(`[getAccessCode] Visitor flow → trying TTLock (create passcode)`);
+                const result = await getOrCreateVisitorPasscode({ validHours: 24 });
+                if (result?.code) {
+                    console.log(`[getAccessCode] ✅ Visitor access code from TTLock (lock ${result.lockId})`);
+                    return result.code;
+                }
+            } catch (err) {
+                console.warn(`[getAccessCode] TTLock visitor passcode failed, trying Cloudbeds:`, err.message);
+            }
+        }
         try {
-            console.log(`[getAccessCode] Visitor flow → searching ALL Cloudbeds properties for door lock code`);
+            console.log(`[getAccessCode] Visitor flow → searching Cloudbeds properties for door lock code`);
             const result = await getVisitorAccessCode();
             if (result?.code) {
                 console.log(`[getAccessCode] ✅ Visitor access code from Cloudbeds property ${result.propertyID}`);

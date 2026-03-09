@@ -1,6 +1,6 @@
 import { supabase } from "../supabase";
 import { normalizeGuestName, normalizeReservationNumber, clampInt, toIntOrNull } from "../utils";
-import { lookupGuestReservation } from "../cloudbeds";
+import { lookupGuestReservation, getDoorLockAccessCode } from "../cloudbeds";
 
 export async function handleUpdateGuest(req, res) {
     const { session_token, guest_name, booking_ref, room_number, expected_guest_count, flow_type, visitor_first_name, visitor_last_name, visitor_phone, visitor_reason } =
@@ -78,6 +78,22 @@ export async function handleUpdateGuest(req, res) {
 
     const verified = !sErr && s ? clampInt(s.verified_guest_count, 0, 10) : 0;
 
+    // Fetch door lock access code from Cloudbeds Door Locks API (GET doorlock/v1/keys/{propertyID})
+    let room_access_code = null;
+    let physical_room = cbResult.roomName || cbResult.roomNumber || null;
+    try {
+        room_access_code = await getDoorLockAccessCode(
+            cbResult.propertyID,
+            cbResult.roomNumber,
+            cbResult.reservationId
+        );
+        if (room_access_code) {
+            console.log(`[update_guest] Room access code from Cloudbeds door lock API for reservation ${cbResult.reservationId}`);
+        }
+    } catch (err) {
+        console.warn("[update_guest] Door lock code fetch failed (non-fatal):", err?.message);
+    }
+
     const updatePayload = {
         guest_name,
         room_number: cbResult.roomNumber || bookingValue,
@@ -89,6 +105,8 @@ export async function handleUpdateGuest(req, res) {
         requires_additional_guest: verified < expectedToSet,
         cloudbeds_reservation_id: cbResult.reservationId,
         cloudbeds_property_id: cbResult.propertyID,
+        physical_room,
+        room_access_code: room_access_code || undefined,
         updated_at: new Date().toISOString(),
     };
 

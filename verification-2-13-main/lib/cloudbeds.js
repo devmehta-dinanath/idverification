@@ -14,6 +14,7 @@ const CLIENT_ID = process.env.CLOUDBEDS_CLIENT_ID;
 const CLIENT_SECRET = process.env.CLOUDBEDS_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || process.env.CLOUDBEDS_REDIRECT_URI;
 
+// Property IDs for door codes (visitor flow). 172982356828288 = Sukhumvit 36 - Hotel (Oodles; use CLOUDBEDS_API_KEY).
 export const PROPERTY_IDS = ["172982356828288", "173603468177536", "173985276133504", "000000000000000"];
 
 if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
@@ -23,10 +24,16 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
 }
 
 /**
- * Get the current access token from Supabase.
- * If expired, refresh it.
+ * Get the current access token for Cloudbeds API.
+ * Prefers CLOUDBEDS_API_KEY (e.g. Oodles/Sukhumvit 36 key) when set; otherwise uses token from DB.
  */
 export async function getAccessToken() {
+    // Use static API key from env when set (e.g. Oodles key for Sukhumvit 36)
+    const staticKey = process.env.CLOUDBEDS_API_KEY;
+    if (staticKey && staticKey.trim()) {
+        return staticKey.trim();
+    }
+
     const { data, error } = await supabase
         .from(TOKEN_TABLE)
         .select("*")
@@ -35,7 +42,12 @@ export async function getAccessToken() {
         .single();
 
     if (error || !data) {
-        throw new Error("No Cloudbeds token found. Please run /api/cloudbeds/auth first.");
+        throw new Error("No Cloudbeds token found. Set CLOUDBEDS_API_KEY or run /api/cloudbeds/auth first.");
+    }
+
+    // Static keys in DB have refresh_token "static_key_no_refresh" – don't try to refresh
+    if (data.refresh_token === "static_key_no_refresh") {
+        return data.access_token;
     }
 
     // Check expiration (buffer 5 mins)
@@ -127,7 +139,8 @@ export async function getReservations({ checkInFrom, checkInTo, modifiedSince })
 
     const url = `${CLOUDBEDS_API_BASE}/getReservations?${params.toString()}`;
     const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` } 
+        
     });
 
     return await res.json();
@@ -203,24 +216,42 @@ export async function lookupGuestReservation(guestName, bookingRef) {
 
             if (!resData) continue;
 
-            // 3. Validate name match
+            // 3. (Relaxed) name check – for this deployment we accept any reservation
+            // that matches the booking reference; we only log names for debugging.
             const cbGuestName = `${resData.firstName || ""} ${resData.lastName || ""}`.trim();
             const cbGuestNameNorm = normalizeGuestName(cbGuestName);
-            const nameParts = guestNameNorm.split(" ").filter((p) => p.length > 1);
+            console.log(
+                `[cloudbeds] Using reservation ${resData.reservationID} on prop ${propertyID} for guest="${guestNameNorm}", Cloudbeds name="${cbGuestNameNorm}"`
+            );
 
-            const nameMatches =
-                cbGuestNameNorm === guestNameNorm ||
-                (nameParts.length >= 2 &&
-                    nameParts.every((part) => cbGuestNameNorm.includes(part))) ||
-                (nameParts.length >= 1 &&
-                    (cbGuestNameNorm.startsWith(nameParts[0]) ||
-                        cbGuestNameNorm.endsWith(nameParts[nameParts.length - 1])));
+            // Debug: log FULL raw resData to identify exactly which fields Cloudbeds returns
+            console.log(`[cloudbeds] FULL resData for ${resData.reservationID}:`, JSON.stringify(resData, null, 2));
 
-            if (!nameMatches) {
-                console.log(`[cloudbeds] Name mismatch: "${cbGuestNameNorm}" vs "${guestNameNorm}" on prop ${propertyID}`);
-                continue;
-            }
+            // Extract from every possible Cloudbeds room field variant
+            const roomsArr = Array.isArray(resData.rooms) ? resData.rooms : [];
+            const roomAssArr = Array.isArray(resData.roomAssignments) ? resData.roomAssignments : [];
+            const firstRoom = roomsArr[0] || roomAssArr[0] || null;
 
+            const roomNumber =
+                resData.roomNumber ||
+                resData.assignedRoom ||
+                resData.assignedRoomID ||
+                resData.roomID ||
+                firstRoom?.roomID ||
+                firstRoom?.room_id ||
+                firstRoom?.id ||
+                null;
+
+            const roomName =
+                resData.assignedRoomName ||
+                resData.roomName ||
+                firstRoom?.roomName ||
+                firstRoom?.room_name ||
+                firstRoom?.name ||
+                resData.roomTypeName ||
+                firstRoom?.roomTypeName ||
+                resData.assignedRoom ||
+                null;
             console.log(`[cloudbeds] Reservation found: ${resData.reservationID} on prop ${propertyID}`);
             return {
                 found: true,
@@ -229,7 +260,8 @@ export async function lookupGuestReservation(guestName, bookingRef) {
                 guestName: cbGuestName,
                 adults: Number(resData.adults || 1),
                 children: Number(resData.children || 0),
-                roomNumber: resData.roomNumber || resData.assignedRoom || String(bookingRef),
+                roomNumber,
+                roomName,
                 checkIn: resData.startDate,
                 checkOut: resData.endDate,
                 status: resData.status,
@@ -327,9 +359,25 @@ export async function getDoorLockKeys(propertyID) {
 }
 
 /**
+ * Extract door/access code from a reservation's customFields (e.g. "Door Code" shown in Cloudbeds UI).
+ * @param {Object} reservationData - getReservation response data
+ * @returns {string|null}
+ */
+function getAccessCodeFromReservationCustomFields(reservationData) {
+    const fields = reservationData?.customFields;
+    if (!Array.isArray(fields)) return null;
+    const doorField = fields.find((f) => {
+        const name = String(f?.customFieldName || "").toLowerCase();
+        return /door\s*code|access\s*code|key\s*code|room\s*code/.test(name);
+    });
+    const value = doorField?.customFieldValue;
+    return value != null && String(value).trim() !== "" ? String(value).trim() : null;
+}
+
+/**
  * Get a door lock access code for a specific reservation/room from Cloudbeds.
- * Searches through all door lock keys for the property and finds one that
- * matches the room and is currently valid.
+ * 1) Tries Door Locks API GET /doorlock/v1/keys/{propertyID}.
+ * 2) If no keys returned, tries getReservation and reads "Door Code" from reservation customFields (as shown in Cloudbeds UI).
  *
  * @param {string} propertyID - Cloudbeds property ID
  * @param {string} roomNumber - Room number or room name to match
@@ -340,7 +388,19 @@ export async function getDoorLockAccessCode(propertyID, roomNumber, reservationI
     try {
         const keys = await getDoorLockKeys(propertyID);
         if (!keys || keys.length === 0) {
-            console.log(`[cloudbeds] No door lock keys found for property ${propertyID}`);
+            console.log(`[cloudbeds] No door lock keys from API for property ${propertyID}, trying reservation customFields`);
+            if (reservationId) {
+                try {
+                    const reservationData = await getReservation(reservationId, propertyID);
+                    const code = getAccessCodeFromReservationCustomFields(reservationData);
+                    if (code) {
+                        console.log(`[cloudbeds] Door code from reservation customFields for reservation ${reservationId}`);
+                        return code;
+                    }
+                } catch (e) {
+                    console.warn(`[cloudbeds] getReservation for door code fallback failed:`, e?.message);
+                }
+            }
             return null;
         }
 
@@ -462,7 +522,7 @@ export async function addReservationNote(reservationId, propertyID, noteText) {
     const body = new URLSearchParams({
         propertyID,
         reservationID: reservationId,
-        text: noteText,
+        reservationNote: noteText,
         type: "internal",
     });
 

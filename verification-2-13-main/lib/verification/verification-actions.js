@@ -511,6 +511,7 @@ export async function handleVerifyFace(req, res) {
             current_step: next_step,
             selfie_url: selfieUrl,
             is_verified: verifiedAfter >= expected,
+            requires_additional_guest: requiresAdditionalGuest,
             verification_score: verificationScore,
             liveness_score: livenessScore,
             face_match_score: similarity,
@@ -599,5 +600,5 @@ export async function handleVerifyFace(req, res) {
         });
     }
 
-    return res.json({ success: true, guest_verified, next_step, access_code, room_access_code: access_code });
+    return res.json({ success: true, guest_verified, next_step, access_code, room_access_code: access_code, is_verified: verifiedAfter >= expected, requires_additional_guest: requiresAdditionalGuest });
 }
