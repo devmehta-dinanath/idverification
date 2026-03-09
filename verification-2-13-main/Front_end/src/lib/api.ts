@@ -4,7 +4,16 @@ import { getApiBaseUrl } from "./storage";
    ACTION TYPES
 ====================================================== */
 
-export type VerifyAction = "start" | "log_consent" | "update_guest" | "get_session" | "upload_document" | "verify_face" | "validate_document" | "validate_selfie";
+export type VerifyAction =
+  | "start"
+  | "log_consent"
+  | "update_guest"
+  | "get_session"
+  | "upload_document"
+  | "verify_face"
+  | "validate_document"
+  | "validate_selfie"
+  | "send_checkin_email";
 
 /* ======================================================
    REQUEST TYPES
@@ -83,6 +92,15 @@ export interface ValidateSelfieRequest {
   image_data: string;
 }
 
+export interface SendCheckinEmailRequest {
+  action: "send_checkin_email";
+  session_token: string;
+  email: string;
+  phone?: string;
+  channel?: "email" | "sms" | "email_and_sms";
+  locale?: string;
+}
+
 export type VerifyRequest =
   | StartSessionRequest
   | StartVisitorRequest
@@ -92,7 +110,8 @@ export type VerifyRequest =
   | UploadDocumentRequest
   | VerifyFaceRequest
   | ValidateDocumentRequest
-  | ValidateSelfieRequest;
+  | ValidateSelfieRequest
+  | SendCheckinEmailRequest;
 
 /* ======================================================
    RESPONSE TYPES
@@ -162,6 +181,18 @@ export interface VerifyResponse {
   verified_guest_count?: number;
   remaining_guest_verifications?: number;
   guest_index?: number;
+}
+
+export interface SendCheckinEmailResponse {
+  success?: boolean;
+  error?: string;
+  code?: string;
+  already_sent?: boolean;
+  sent_email?: boolean;
+  sent_sms?: boolean;
+  sent_to_email?: string | null;
+  sent_to_phone?: string | null;
+  sent_at?: string;
 }
 
 export interface AdminStats {
@@ -279,6 +310,13 @@ class ApiService {
   /* ---------- VERIFY (all actions) ---------- */
   async verify(data: VerifyRequest): Promise<VerifyResponse> {
     return this.fetchApi<VerifyResponse>("/api/verify", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendCheckinEmail(data: SendCheckinEmailRequest): Promise<SendCheckinEmailResponse> {
+    return this.fetchApi<SendCheckinEmailResponse>("/api/verify", {
       method: "POST",
       body: JSON.stringify(data),
     });

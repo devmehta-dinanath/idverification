@@ -20,5 +20,11 @@ ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS cloudbeds_property_id text;
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS physical_room text;
 ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS room_access_code text;
 
+-- Notification tracking for check-in details (email/SMS)
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS checkin_email_sent_at timestamptz;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS checkin_email_sent_to text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS checkin_sms_sent_to text;
+ALTER TABLE demo_sessions ADD COLUMN IF NOT EXISTS checkin_notification_attempts integer DEFAULT 0;
+
 -- These columns store the Cloudbeds reservation reference so that
 -- document uploads and verification notes can be pushed back to the PMS.

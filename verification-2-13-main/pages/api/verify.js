@@ -28,6 +28,7 @@ import {
   handleUploadDocument,
   handleVerifyFace
 } from "../../lib/verification/verification-actions";
+import { handleSendCheckinEmail } from "../../lib/verification/notification-actions";
 
 export default async function handler(req, res) {
   setCors(res);
@@ -65,6 +66,8 @@ export default async function handler(req, res) {
         return await handleUploadDocument(req, res);
       case "verify_face":
         return await handleVerifyFace(req, res);
+      case "send_checkin_email":
+        return await handleSendCheckinEmail(req, res);
       default:
         return res.status(400).json({ error: "Invalid action" });
     }

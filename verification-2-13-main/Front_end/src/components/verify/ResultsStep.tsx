@@ -4,8 +4,12 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Home, RotateCcw } from "lucide-react";
 import { VerificationData } from "@/pages/Verify";
 import confetti from "canvas-confetti";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 type Props = {
   data: VerificationData;
@@ -17,9 +21,15 @@ const COUNTDOWN_SECONDS = 45;
 
 const ResultsStep = ({ data, onRetry, onHome }: Props) => {
   const isSuccess = Boolean(data.isVerified);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { toast } = useToast();
 
   const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
+  const [email, setEmail] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [alreadySent, setAlreadySent] = useState(false);
+  const [sentToEmail, setSentToEmail] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isSuccess) {
@@ -68,6 +78,90 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
   // If they typed OTA numeric ID, keep showing the booking ref (roomNumber)
   const displayedReservationRef =
     data.roomNumber || anyData.booking_ref || anyData.bookingRef || anyData.room_number || "";
+
+  const sessionToken = data.sessionToken;
+
+  const handleSendDetails = async (event: FormEvent) => {
+    event.preventDefault();
+    if (alreadySent || isSending) return;
+
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail) {
+      setFormError("Please enter an email address.");
+      return;
+    }
+
+    // Basic client-side email validation; server does full validation.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setFormError("Please enter a valid email address.");
+      return;
+    }
+
+    if (!sessionToken) {
+      setFormError("Session information is missing. Please start a new verification.");
+      toast({
+        title: "Session expired",
+        description: "Please restart the verification process.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setFormError(null);
+    setIsSending(true);
+
+    try {
+      const res = await api.sendCheckinEmail({
+        action: "send_checkin_email",
+        session_token: sessionToken,
+        email: trimmedEmail,
+        channel: "email",
+        locale: i18n.language,
+      });
+
+      if (!res.success && res.error) {
+        setFormError(res.error);
+        toast({
+          title: "Could not send details",
+          description: res.error,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (res.already_sent) {
+        setAlreadySent(true);
+        setSentToEmail(res.sent_to_email || trimmedEmail);
+        setSentToPhone(res.sent_to_phone || trimmedPhone || null);
+        toast({
+          title: "Details already sent",
+          description: res.sent_to_email
+            ? `Check the inbox for ${res.sent_to_email}.`
+            : "Check-in details were already sent for this session.",
+        });
+        return;
+      }
+
+      setAlreadySent(true);
+      setSentToEmail(res.sent_to_email || trimmedEmail);
+
+      toast({
+        title: "Details sent",
+        description: "We sent your check-in details to your email.",
+      });
+    } catch (error: any) {
+      const message = error?.message || "Failed to send check-in details.";
+      setFormError(message);
+      toast({
+        title: "Could not send details",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   if (isSuccess) {
     return (
@@ -128,6 +222,73 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
               {t("visitor.showAtDoor", { defaultValue: "Valid for entry to the property" })}
             </p>
           </motion.div>
+        )}
+
+        {isSuccess && (
+          <div className="bg-white rounded-xl p-6 mb-8 shadow-lg text-left">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {t("results.sendDetailsTitle", {
+                defaultValue: "Send your check-in details",
+              })}
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {t("results.sendDetailsDescription", {
+                defaultValue:
+                  "Receive your reservation reference, room details, and door access code by email.",
+              })}
+            </p>
+
+            <form onSubmit={handleSendDetails} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-800">
+                  {t("results.emailLabel", { defaultValue: "Email address" })}
+                </label>
+                <Input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  required
+                  disabled={alreadySent || isSending}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="guest@example.com"
+                />
+              </div>
+
+              {formError && (
+                <p className="text-sm text-red-600" role="alert">
+                  {formError}
+                </p>
+              )}
+
+              {alreadySent && (
+                <p className="text-sm text-green-700">
+                  {t("results.detailsSentSummary", {
+                    defaultValue: "Details sent to {{email}}.",
+                    email: sentToEmail || "",
+                  })}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                disabled={alreadySent || isSending}
+                className="w-full h-11 text-base font-semibold bg-green-500 hover:bg-green-600 text-white"
+              >
+                {alreadySent
+                  ? t("results.detailsAlreadySentButton", {
+                      defaultValue: "Details sent",
+                    })
+                  : isSending
+                    ? t("results.sendingDetailsButton", {
+                        defaultValue: "Sending…",
+                      })
+                    : t("results.sendDetailsButton", {
+                        defaultValue: "Send details",
+                      })}
+              </Button>
+            </form>
+          </div>
         )}
 
         <div className="glass rounded-xl p-4 mb-8">
