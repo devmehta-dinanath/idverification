@@ -2,10 +2,13 @@ import { supabase } from "../supabase";
 import { generateToken } from "../utils";
 import { inferStepFromSession } from "../session";
 import { clampInt } from "../utils";
+import { getPropertyIdFromRequest } from "./request-utils";
 
 export async function handleStartVisitor(req, res) {
+    const headerPropertyId = getPropertyIdFromRequest(req);
     const { property_external_id: bodyPropertyExternalId } = req.body || {};
-    const property_external_id = bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
+    const property_external_id =
+        headerPropertyId || bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
 
     const token = generateToken();
     const expected_guest_count = 1;
@@ -38,8 +41,10 @@ export async function handleStartVisitor(req, res) {
 }
 
 export async function handleStart(req, res) {
+    const headerPropertyId = getPropertyIdFromRequest(req);
     const { property_external_id: bodyPropertyExternalId } = req.body || {};
-    const property_external_id = bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
+    const property_external_id =
+        headerPropertyId || bodyPropertyExternalId || process.env.DEFAULT_PROPERTY_EXTERNAL_ID || null;
 
     const token = generateToken();
     const expected_guest_count = 1;

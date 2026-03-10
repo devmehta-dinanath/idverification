@@ -176,16 +176,22 @@ export async function findReservationByReference(referenceId, propertyID = null)
 
 /**
  * Look up a reservation directly from Cloudbeds to validate guest identity.
- * Searches across all configured properties and validates the guest name.
- * Replaces the Supabase booking_email_index lookup.
+ * Searches across all configured properties (or a single property when provided)
+ * and validates the guest name. Replaces the Supabase booking_email_index lookup.
  *
+ * @param {string} guestName
+ * @param {string} bookingRef
+ * @param {{ propertyID?: string }} [options]
  * @returns {{ found: true, propertyID, reservationId, guestName, adults, children, roomNumber, checkIn, checkOut, status } | { found: false }}
  */
-export async function lookupGuestReservation(guestName, bookingRef) {
+export async function lookupGuestReservation(guestName, bookingRef, options = {}) {
     const { normalizeGuestName } = await import("./utils.js");
     const guestNameNorm = normalizeGuestName(guestName);
 
-    for (const propertyID of PROPERTY_IDS) {
+    const explicitProperty = options?.propertyID && String(options.propertyID).trim();
+    const propertyIdsToSearch = explicitProperty ? [explicitProperty] : PROPERTY_IDS;
+
+    for (const propertyID of propertyIdsToSearch) {
         try {
             const token = await getAccessToken();
             let resData = null;
