@@ -89,4 +89,9 @@
   .text-glow {
     text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
   }
+
+  /* Hide scrollbars for specific ScrollArea instances while preserving scroll */
+  .scrollarea-no-thumb [data-radix-scroll-area-scrollbar] {
+    display: none !important;
+  }
 }

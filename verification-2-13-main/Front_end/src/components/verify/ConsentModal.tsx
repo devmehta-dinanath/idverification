@@ -22,7 +22,7 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
   const [isLoading, setIsLoading] = useState(false);
   const retryAbortRef = useRef(false);
   const { toast } = useToast();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const logConsentWithRetry = async (sessionToken: string, attempt = 0): Promise<void> => {
     if (retryAbortRef.current) return;
@@ -33,7 +33,7 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
         session_token: sessionToken,
         consent_given: true,
         consent_time: new Date().toISOString(),
-        consent_locale: "en-th",
+        consent_locale: i18n.language,
       });
       console.log("[Consent] logged successfully");
     } catch {
@@ -83,7 +83,7 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
           session_token: sessionToken,
           consent_given: true,
           consent_time: new Date().toISOString(),
-          consent_locale: "en-th",
+          consent_locale: i18n.language,
         });
         console.log("[Consent] Consent logged successfully");
       } catch (consentErr) {
@@ -120,7 +120,7 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
       >
         <h2 className="text-2xl md:text-3xl font-thin text-white mb-6 text-center">{t("consent.title")}</h2>
 
-        <ScrollArea className="flex-1 mb-6 -mr-4 pr-6">
+        <ScrollArea className="mb-6 pr-2 h-[40vh] scrollarea-no-thumb">
           <div className="space-y-4 text-white/90 text-sm md:text-base pr-2">
             <p>{t("consent.intro")}</p>
             <p className="font-semibold">{t("consent.dataCollection")}</p>
@@ -136,10 +136,12 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
             <p className="font-semibold">{t("consent.rights")}</p>
             <p>{t("consent.rightsText")}</p>
 
-            <div className="pt-4 border-t border-white/20">
-              <h4 className="font-semibold">{t("consent.thaiTitle")}</h4>
-              <p>{t("consent.thaiText")}</p>
-            </div>
+            {i18n.language === "th" && (
+              <div className="pt-4 border-t border-white/20">
+                <h4 className="font-semibold">{t("consent.thaiTitle")}</h4>
+                <p>{t("consent.thaiText")}</p>
+              </div>
+            )}
           </div>
         </ScrollArea>
 
