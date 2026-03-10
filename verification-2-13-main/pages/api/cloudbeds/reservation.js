@@ -1,13 +1,14 @@
 // pages/api/cloudbeds/reservation.js
 import { lookupGuestReservation, getReservationDoorCode } from "../../../lib/cloudbeds";
 import { getAccessCode } from "../../../lib/access-codes";
+import { getPropertyIdFromRequest } from "../../../lib/verification/request-utils";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { reservation_id, third_party_identifier, sub_reservation_id } = req.body || {};
+  const { reservation_id, third_party_identifier, sub_reservation_id, property_id } = req.body || {};
 
   try {
     // Try reservationID first, then thirdPartyIdentifier, then subReservationID
@@ -32,10 +33,18 @@ export default async function handler(req, res) {
       });
     }
 
+    const headerPropertyId = getPropertyIdFromRequest(req);
+    const propertyForLookup = headerPropertyId || (property_id ? String(property_id).trim() : null) || null;
+
     // Try to find reservation in Cloudbeds using lookupGuestReservation
     // Note: We need guest name for lookupGuestReservation, but we can try without it first
-    // lookupGuestReservation will search across all properties
-    const cbResult = await lookupGuestReservation("", bookingRef);
+    // lookupGuestReservation will search across all properties unless a specific
+    // propertyID is provided (via header or body).
+    const cbResult = await lookupGuestReservation(
+      "",
+      bookingRef,
+      propertyForLookup ? { propertyID: propertyForLookup } : undefined
+    );
     
     if (cbResult.found) {
       // Try to get door code from reservation custom fields first

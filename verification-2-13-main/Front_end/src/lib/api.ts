@@ -281,10 +281,23 @@ class ApiService {
       console.log("[ApiService] Request body:", options.body);
     }
 
+    let propertyHeaders: Record<string, string> = {};
+    if (typeof window !== "undefined") {
+      try {
+        const storedPropertyId = window.sessionStorage.getItem("opsian_property_id");
+        if (storedPropertyId) {
+          propertyHeaders["X-Property-ID"] = storedPropertyId;
+        }
+      } catch {
+        // Ignore storage errors (e.g. disabled storage)
+      }
+    }
+
     const response = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...propertyHeaders,
         ...options?.headers,
       },
     });

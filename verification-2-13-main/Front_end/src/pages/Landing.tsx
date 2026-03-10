@@ -70,6 +70,16 @@ const Landing = () => {
 
       const token = response.session_token || response.verify_url?.split("/").pop();
       if (token) {
+        // Remember property context so subsequent API calls can include it
+        // even if the URL changes.
+        if (propertyExternalId) {
+          try {
+            sessionStorage.setItem("opsian_property_id", propertyExternalId);
+          } catch {
+            // Ignore storage errors
+          }
+        }
+
         // Store flow type in sessionStorage as fallback
         try {
           sessionStorage.setItem(`verify_flow_${token}`, flowType);

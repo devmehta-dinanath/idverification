@@ -1,12 +1,15 @@
 // pages/api/cloudbeds/keys.js
 import { getDoorLockKeys } from "../../../lib/cloudbeds";
+import { getPropertyIdFromRequest } from "../../../lib/verification/request-utils";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { property_id, room_number, reservation_id } = req.body || {};
+  const { property_id: bodyPropertyId, room_number, reservation_id } = req.body || {};
+  const headerPropertyId = getPropertyIdFromRequest(req);
+  const property_id = headerPropertyId || (bodyPropertyId ? String(bodyPropertyId).trim() : null);
 
   try {
     if (!property_id) {

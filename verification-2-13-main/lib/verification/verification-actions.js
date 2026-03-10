@@ -6,6 +6,7 @@ import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekogni
 import { getAccessCode } from "../access-codes";
 import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation } from "../cloudbeds";
 import { appendGuestRow } from "../google-sheets";
+import { getPropertyIdFromRequest } from "./request-utils";
 
 // ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
 const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
@@ -630,7 +631,14 @@ export async function handleVerifyFace(req, res) {
             const cbResId = session.cloudbeds_reservation_id;
             if (cbResId) {
                 try {
-                    cbData = await lookupGuestReservation(session.guest_name, cbResId);
+                    const headerPropertyId = getPropertyIdFromRequest(req);
+                    const propertyIdForLookup =
+                        headerPropertyId || session.cloudbeds_property_id || session.property_external_id || null;
+                    cbData = await lookupGuestReservation(
+                        session.guest_name,
+                        cbResId,
+                        propertyIdForLookup ? { propertyID: propertyIdForLookup } : undefined
+                    );
                 } catch (cbErr) {
                     console.warn("[verify_face] Cloudbeds re-fetch for sheet failed:", cbErr.message);
                 }

@@ -1,6 +1,7 @@
 import { supabase } from "../supabase";
 import { normalizeGuestName, normalizeReservationNumber, clampInt, toIntOrNull } from "../utils";
 import { lookupGuestReservation, getDoorLockAccessCode } from "../cloudbeds";
+import { getPropertyIdFromRequest } from "./request-utils";
 
 export async function handleUpdateGuest(req, res) {
     const { session_token, guest_name, booking_ref, room_number, expected_guest_count, flow_type, visitor_first_name, visitor_last_name, visitor_phone, visitor_reason } =
@@ -56,7 +57,24 @@ export async function handleUpdateGuest(req, res) {
     // ✅ GUEST FLOW: Look up reservation directly from Cloudbeds (no local cache)
     console.log(`[update_guest] Querying Cloudbeds for guest="${guest_name}", ref="${bookingValue}"`);
 
-    const cbResult = await lookupGuestReservation(guest_name, bookingValue);
+    // Resolve property context: header takes precedence, then session property_external_id.
+    const headerPropertyId = getPropertyIdFromRequest(req);
+
+    const { data: s, error: sErr } = await supabase
+        .from("demo_sessions")
+        .select("verified_guest_count, property_external_id")
+        .eq("session_token", session_token)
+        .single();
+
+    const verified = !sErr && s ? clampInt(s.verified_guest_count, 0, 10) : 0;
+    const sessionPropertyId = s?.property_external_id || null;
+    const propertyForLookup = headerPropertyId || sessionPropertyId || null;
+
+    const cbResult = await lookupGuestReservation(
+        guest_name,
+        bookingValue,
+        propertyForLookup ? { propertyID: propertyForLookup } : undefined
+    );
 
     if (!cbResult.found) {
         return res.status(403).json({
@@ -69,14 +87,6 @@ export async function handleUpdateGuest(req, res) {
 
     const expectedOverride = toIntOrNull(expected_guest_count);
     const expectedToSet = expectedOverride === null ? adultsFromCB : clampInt(expectedOverride, 1, 10);
-
-    const { data: s, error: sErr } = await supabase
-        .from("demo_sessions")
-        .select("verified_guest_count")
-        .eq("session_token", session_token)
-        .single();
-
-    const verified = !sErr && s ? clampInt(s.verified_guest_count, 0, 10) : 0;
 
     // Fetch door lock access code from Cloudbeds Door Locks API (GET doorlock/v1/keys/{propertyID})
     let room_access_code = null;
