@@ -28,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useToast } from "@/hooks/use-toast";
 import { ExtendedSessionRow, TM30Data, getTM30ReadyStatus, getConfidenceLevel, ConfidenceLevel } from "@/types/tm30";
 import { exportSingleTM30 } from "@/lib/tm30ExportUtils";
+import { api } from "@/lib/api";
 
 interface TM30DetailsDrawerProps {
   session: ExtendedSessionRow;
@@ -76,11 +77,40 @@ const TM30DetailsDrawer = ({ session, onSave, onMarkReady }: TM30DetailsDrawerPr
 
   const handleSave = async () => {
     setSaving(true);
-    // TODO: Replace with actual API call
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    onSave(session.id, formData);
-    setSaving(false);
-    toast({ title: "Saved", description: "TM30 data has been saved." });
+    try {
+      const sessionToken = (session as any).session_token;
+      if (!sessionToken) {
+        throw new Error("Session token is required to save TM30 data");
+      }
+
+      const response = await api.verify({
+        action: "tm30_update",
+        session_token: sessionToken,
+        tm30_info: formData,
+      } as any);
+
+      // Update local state after successful save
+      onSave(session.id, formData);
+      
+      // Show success message with status info
+      const statusMessage = (response as any).tm30_status === "ready" 
+        ? "TM30 data saved and marked as ready." 
+        : "TM30 data saved (draft - some fields missing).";
+      
+      toast({ 
+        title: "Saved", 
+        description: statusMessage,
+      });
+    } catch (error: any) {
+      console.error("Failed to save TM30 data:", error);
+      toast({ 
+        title: "Save Failed", 
+        description: error?.message || "Failed to save TM30 data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleMarkReady = () => {

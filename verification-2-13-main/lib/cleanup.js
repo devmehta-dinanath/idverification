@@ -10,11 +10,12 @@ const s3 = new S3Client({ region: process.env.S3_REGION || process.env.AWS_REGIO
 const BUCKET = process.env.S3_BUCKET_NAME;
 
 export async function deleteOldSessionsAndImages() {
+  const retentionHours = Number(process.env.PDPA_RETENTION_HOURS || 72);
   const cutoffDate = new Date();
-  cutoffDate.setHours(cutoffDate.getHours() - 72); // 72 hours ago
+  cutoffDate.setHours(cutoffDate.getHours() - retentionHours); // 72 hours ago
   const cutoffTimestamp = cutoffDate.toISOString();
   
-  console.log('Starting cleanup for sessions older than:', cutoffTimestamp);
+  `Starting cleanup for sessions older than: ${cutoffTimestamp} (retentionHours=${retentionHours})`
   
   let deletedSessions = 0;
   let deletedImages = 0;
