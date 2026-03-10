@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: idverification_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # If you have environment variables, either:
+    # 1) Use an env_file (recommended):
+    env_file:
+      - .env.production
+    # or 2) Define them inline:
+    # environment:
+    #   SUPABASE_URL: "https://..."
+    #   SUPABASE_KEY: "your-key"
+
+

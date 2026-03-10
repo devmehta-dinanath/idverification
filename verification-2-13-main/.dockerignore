@@ -1,0 +1,26 @@
+node_modules
+npm-debug.log
+Dockerfile*
+.dockerignore
+.git
+.gitignore
+.vscode
+.DS_Store
+
+# Next.js build output (rebuilt in Docker)
+.next
+
+# Frontend build artifacts (rebuilt in Docker)
+Front_end/node_modules
+Front_end/dist
+
+# Logs
+logs
+*.log
+
+# OS / editor junk
+*.swp
+*.swo
+*.tmp
+
+
