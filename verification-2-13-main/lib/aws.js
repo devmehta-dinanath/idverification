@@ -42,8 +42,24 @@ export async function runTextractAnalyzeIdWithTimeout(imageBuffer, timeoutMs = 1
                 DocumentPages: [{ Bytes: imageBuffer }],
             })
         );
-        const fields = res?.IdentityDocuments?.[0]?.IdentityDocumentFields || [];
+        
+        // Log raw response for debugging
+        const identityDoc = res?.IdentityDocuments?.[0];
+        const fields = identityDoc?.IdentityDocumentFields || [];
         console.log(`[textract] Received ${fields.length} fields from Textract`);
+        
+        // Log all detected fields with confidence scores
+        if (fields.length > 0) {
+            console.log(`[textract] Raw fields detected:`);
+            fields.forEach(f => {
+                const type = f?.Type?.Text || 'unknown';
+                const value = f?.ValueDetection?.Text || '';
+                const confidence = f?.ValueDetection?.Confidence || 0;
+                const normalizedValue = f?.ValueDetection?.NormalizedValue;
+                console.log(`  - ${type}: "${value}" (confidence: ${confidence.toFixed(1)}%)${normalizedValue ? ` [normalized: ${JSON.stringify(normalizedValue)}]` : ''}`);
+            });
+        }
+        
         return parseAnalyzeIdFields(fields);
     };
 
