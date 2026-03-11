@@ -4,7 +4,7 @@ import { normalizeBase64, clampInt, streamToBuffer } from "../utils";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekognition";
 import { getAccessCode } from "../access-codes";
-import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation } from "../cloudbeds";
+import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation, markReservationCheckedIn } from "../cloudbeds";
 import { insertVerifiedGuestRow } from "../verification-log";
 import { getPropertyIdFromRequest } from "./request-utils";
 
@@ -619,6 +619,33 @@ export async function handleVerifyFace(req, res) {
             console.log(`[verify_face] Pushed verification note to Cloudbeds reservation ${cb_res_id}`);
         } catch (cbErr) {
             console.warn("[verify_face] Cloudbeds note push failed (non-fatal):", cbErr.message);
+        }
+
+        // ── Mark check-in as completed when all guests are verified ──
+        if (verifiedAfter >= expected && guest_verified) {
+            try {
+                console.log(`[verify_face] All guests verified (${verifiedAfter}/${expected}), marking check-in in Cloudbeds...`);
+                const checkInResult = await markReservationCheckedIn(cb_res_id, cb_prop_id, {
+                    maxRetries: 3,
+                    initialDelayMs: 1000,
+                });
+                
+                if (checkInResult.success) {
+                    console.log(`[verify_face] ✅ Check-in marked successfully in Cloudbeds for reservation ${cb_res_id}`);
+                    
+                    // Add a follow-up note confirming check-in
+                    try {
+                        const checkInNote = `✅ Check-in completed via ID verification system at ${new Date().toISOString()}`;
+                        await addReservationNote(cb_res_id, cb_prop_id, checkInNote);
+                    } catch (noteErr) {
+                        console.warn("[verify_face] Failed to add check-in confirmation note (non-fatal):", noteErr.message);
+                    }
+                } else {
+                    console.warn(`[verify_face] ⚠️  Check-in marking failed for reservation ${cb_res_id}: ${checkInResult.error}`);
+                }
+            } catch (checkInErr) {
+                console.error("[verify_face] Exception while marking check-in (non-fatal):", checkInErr?.message || checkInErr);
+            }
         }
     }
 

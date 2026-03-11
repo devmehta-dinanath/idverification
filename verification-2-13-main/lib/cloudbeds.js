@@ -573,3 +573,102 @@ export async function addReservationNote(reservationId, propertyID, noteText) {
     }
     return json;
 }
+
+/**
+ * Mark a reservation as checked-in in Cloudbeds.
+ * Includes retry logic with exponential backoff and comprehensive logging.
+ * 
+ * @param {string} reservationId - Cloudbeds reservation ID
+ * @param {string} propertyID - Cloudbeds property ID
+ * @param {object} options - Optional configuration
+ * @param {number} options.maxRetries - Maximum number of retry attempts (default: 3)
+ * @param {number} options.initialDelayMs - Initial delay before first retry in ms (default: 1000)
+ * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+ */
+export async function markReservationCheckedIn(reservationId, propertyID, options = {}) {
+    const maxRetries = options.maxRetries ?? 3;
+    const initialDelayMs = options.initialDelayMs ?? 1000;
+    const logPrefix = `[cloudbeds:check-in] Reservation ${reservationId}`;
+
+    console.log(`${logPrefix} → Starting check-in process...`);
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const token = await getAccessToken();
+            
+            // Cloudbeds API endpoint for updating reservation status
+            // Using PUT method and v1.3 API as per Cloudbeds documentation
+            const body = new URLSearchParams({
+                propertyID: String(propertyID),
+                reservationID: String(reservationId),
+                status: "checked_in", // Valid enum value per Cloudbeds docs
+            });
+
+            // Use v1.3 API and PUT method (per Cloudbeds API documentation)
+            const url = `https://api.cloudbeds.com/api/v1.3/putReservation`;
+            console.log(`${logPrefix} → Attempt ${attempt + 1}/${maxRetries + 1}: Calling ${url} (PUT)`);
+
+            const startTime = Date.now();
+            const res = await fetch(url, {
+                method: "PUT",  // Changed from POST to PUT per Cloudbeds docs
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+                body,
+            });
+
+            const duration = Date.now() - startTime;
+            
+            // Handle non-JSON responses (like HTML error pages)
+            let json;
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                json = await res.json();
+            } else {
+                const text = await res.text();
+                console.warn(`${logPrefix} → Non-JSON response (${res.status}):`, text.substring(0, 200));
+                json = { success: false, message: `HTTP ${res.status}: ${text.substring(0, 100)}` };
+            }
+
+            if (res.ok && json.success) {
+                console.log(`${logPrefix} ✅ Check-in marked successfully (attempt ${attempt + 1}, ${duration}ms)`);
+                return { success: true, message: json.message || "Check-in completed successfully" };
+            } else {
+                const errorMsg = json.message || `HTTP ${res.status}`;
+                console.warn(`${logPrefix} ⚠️  Check-in failed (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMsg}`);
+
+                // Don't retry on certain errors (e.g., already checked in, invalid reservation)
+                if (res.status === 400 || res.status === 404) {
+                    console.log(`${logPrefix} → Non-retryable error, stopping attempts`);
+                    return { success: false, error: errorMsg };
+                }
+
+                // Retry on 5xx errors or network issues
+                if (attempt < maxRetries) {
+                    const delayMs = initialDelayMs * Math.pow(2, attempt);
+                    console.log(`${logPrefix} → Retrying in ${delayMs}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    continue;
+                } else {
+                    return { success: false, error: errorMsg };
+                }
+            }
+        } catch (error) {
+            const errorMsg = error?.message || String(error);
+            console.error(`${logPrefix} ❌ Exception on attempt ${attempt + 1}/${maxRetries + 1}:`, errorMsg);
+
+            if (attempt < maxRetries) {
+                const delayMs = initialDelayMs * Math.pow(2, attempt);
+                console.log(`${logPrefix} → Retrying after exception in ${delayMs}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                continue;
+            } else {
+                return { success: false, error: errorMsg };
+            }
+        }
+    }
+
+    return { success: false, error: "Max retries exceeded" };
+}
