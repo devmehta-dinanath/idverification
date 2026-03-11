@@ -5,7 +5,7 @@ import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekognition";
 import { getAccessCode } from "../access-codes";
 import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation } from "../cloudbeds";
-import { appendGuestRow } from "../google-sheets";
+import { insertVerifiedGuestRow } from "../verification-log";
 import { getPropertyIdFromRequest } from "./request-utils";
 
 // ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
@@ -622,7 +622,7 @@ export async function handleVerifyFace(req, res) {
         }
     }
 
-    // ── Append guest row to Google Sheet when all guests are verified (best-effort) ──
+    // ── Log verified guest row to Supabase when all guests are verified (best-effort) ──
     if (updateApplied && verifiedAfter >= expected) {
         try {
             // Re-fetch from Cloudbeds using reservation ID (not room_number which is now the
@@ -654,7 +654,9 @@ export async function handleVerifyFace(req, res) {
             const middleName = textract.middle_name || (firstParts.length > 1 ? firstParts.slice(1).join(" ") : "");
             const lastName = textract.last_name || gd.lastName || nameParts.slice(1).join(" ") || "";
 
-            await appendGuestRow({
+            await insertVerifiedGuestRow({
+                session_token,
+                guest_index: guestIndex,
                 firstName,
                 middleName,
                 lastName,
@@ -670,9 +672,11 @@ export async function handleVerifyFace(req, res) {
                 email: gd.email || gd.guestEmail || "",
                 verifiedAt: new Date().toISOString(),
                 verificationScore,
+                cloudbeds_reservation_id: session.cloudbeds_reservation_id || cbResId || null,
+                cloudbeds_property_id: session.cloudbeds_property_id || session.property_external_id || null,
             });
-        } catch (sheetErr) {
-            console.warn("[verify_face] Google Sheets append failed (non-fatal):", sheetErr.message);
+        } catch (logErr) {
+            console.warn("[verify_face] Supabase verification log insert failed (non-fatal):", logErr.message);
         }
     }
 

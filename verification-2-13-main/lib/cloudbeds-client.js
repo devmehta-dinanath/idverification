@@ -78,7 +78,7 @@ export function getGuestIsCheckedIn(cloudbeds) {
  * @param {string} [roomNumber] - Optional room number to filter keys
  * @param {string} [reservationId] - Optional reservation ID to filter keys
  * @returns {Promise<Array>} Array of door lock key objects
- */
+ */ 
 export async function fetchCloudbedsKeys(propertyID, roomNumber = null, reservationId = null) {
   console.log("[Cloudbeds] Fetching door lock keys:", { propertyID, roomNumber, reservationId });
 
