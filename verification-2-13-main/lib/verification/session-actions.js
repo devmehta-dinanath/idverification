@@ -126,6 +126,22 @@ export async function handleGetSession(req, res) {
                 ? false
                 : verified < expected;
 
+    let wifiConfig = null;
+    try {
+        const property_external_id = session.property_external_id || null;
+        if (property_external_id) {
+            const { data: wifiRow } = await supabase
+                .from("property_wifi_configs")
+                .select("wifi_ssid,wifi_password,wifi_security")
+                .eq("property_external_id", property_external_id)
+                .maybeSingle();
+            wifiConfig = wifiRow || null;
+        }
+    } catch (e) {
+        // Non-fatal: if wifi lookup fails, session should still load.
+        console.warn("[get_session] wifi config lookup failed:", e?.message || e);
+    }
+
     return res.json({
         success: true,
         session: {
@@ -138,6 +154,7 @@ export async function handleGetSession(req, res) {
             // Helpful for multi-guest loops: "who is next?"
             // (does not require a DB column)
             guest_index: Math.min(verified + 1, expected),
+            ...(wifiConfig ? wifiConfig : {}),
         },
     });
 }

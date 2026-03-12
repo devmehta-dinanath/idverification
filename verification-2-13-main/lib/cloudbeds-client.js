@@ -182,7 +182,7 @@ export async function fetchCloudbedsAccessCode(propertyID, roomNumber = null, re
         if (now < from) timeValid = false;
       }
       if (key.validTo || key.valid_to) {
-        const to = new Date(key.validTo || key.valid_to);
+        const to = new Date(key.validTo || key.valid_to);                                                                    
         if (now > to) timeValid = false;
       }
 

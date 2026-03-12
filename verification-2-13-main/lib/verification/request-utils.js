@@ -10,14 +10,6 @@ export function getPropertyIdFromRequest(req) {
         return String(headers[headerKey]).trim() || null;
     }
 
-    const body = req.body || {};
-    if (body.property_external_id) {
-        return String(body.property_external_id).trim() || null;
-    }
-    if (body.property_id) {
-        return String(body.property_id).trim() || null;
-    }
-
     return null;
 }
 

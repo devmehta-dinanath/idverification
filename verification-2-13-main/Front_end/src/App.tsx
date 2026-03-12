@@ -12,6 +12,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import DataRetention from "./pages/DataRetention";
 import Terms from "./pages/Terms";
 import NotFound from "./pages/NotFound";
+import TestResults from "./pages/TestResults";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/data-retention" element={<DataRetention />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/test-results" element={<TestResults />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

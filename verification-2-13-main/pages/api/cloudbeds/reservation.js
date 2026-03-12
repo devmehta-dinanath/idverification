@@ -33,18 +33,22 @@ export default async function handler(req, res) {
       });
     }
 
+    // Require property ID from header. If not present, behave as "reservation not found".
     const headerPropertyId = getPropertyIdFromRequest(req);
-    const propertyForLookup = headerPropertyId || (property_id ? String(property_id).trim() : null) || null;
+    if (!headerPropertyId) {
+      return res.status(404).json({
+        success: false,
+        error: "Reservation not found",
+      });
+    }
+
+    const propertyForLookup = String(headerPropertyId).trim();
 
     // Try to find reservation in Cloudbeds using lookupGuestReservation
     // Note: We need guest name for lookupGuestReservation, but we can try without it first
     // lookupGuestReservation will search across all properties unless a specific
     // propertyID is provided (via header or body).
-    const cbResult = await lookupGuestReservation(
-      "",
-      bookingRef,
-      propertyForLookup ? { propertyID: propertyForLookup } : undefined
-    );
+    const cbResult = await lookupGuestReservation("", bookingRef, { propertyID: propertyForLookup });
     
     if (cbResult.found) {
       // Try to get door code from reservation custom fields first

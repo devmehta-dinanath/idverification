@@ -57,23 +57,26 @@ export async function handleUpdateGuest(req, res) {
     // ✅ GUEST FLOW: Look up reservation directly from Cloudbeds (no local cache)
     console.log(`[update_guest] Querying Cloudbeds for guest="${guest_name}", ref="${bookingValue}"`);
 
-    // Resolve property context: header takes precedence, then session property_external_id.
+    // Require property ID from header for guest flow.
     const headerPropertyId = getPropertyIdFromRequest(req);
+    if (!headerPropertyId) {
+        return res.status(403).json({
+            error: "Reservation not found. Please enter your name and reservation number exactly as shown in your confirmation email.",
+        });
+    }
 
     const { data: s, error: sErr } = await supabase
         .from("demo_sessions")
-        .select("verified_guest_count, property_external_id")
+        .select("verified_guest_count")
         .eq("session_token", session_token)
         .single();
 
     const verified = !sErr && s ? clampInt(s.verified_guest_count, 0, 10) : 0;
-    const sessionPropertyId = s?.property_external_id || null;
-    const propertyForLookup = headerPropertyId || sessionPropertyId || null;
 
     const cbResult = await lookupGuestReservation(
         guest_name,
         bookingValue,
-        propertyForLookup ? { propertyID: propertyForLookup } : undefined
+        { propertyID: String(headerPropertyId).trim() }
     );
 
     if (!cbResult.found) {

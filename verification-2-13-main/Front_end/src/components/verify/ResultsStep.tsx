@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import WifiQRCode from "@/components/WifiQRCode";
+import siteLogoSrc from "@/assets/site-logo.png";
 
 type Props = {
   data: VerificationData;
@@ -80,6 +82,9 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
     data.roomNumber || anyData.booking_ref || anyData.bookingRef || anyData.room_number || "";
 
   const sessionToken = data.sessionToken;
+  const wifiSsid = (data as any).wifiSsid || (anyData as any).wifi_ssid || null;
+  const wifiPassword = (data as any).wifiPassword ?? (anyData as any).wifi_password ?? null;
+  const wifiSecurity = (data as any).wifiSecurity || (anyData as any).wifi_security || null;
 
   const handleSendDetails = async (event: FormEvent) => {
     event.preventDefault();
@@ -133,7 +138,7 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
       if (res.already_sent) {
         setAlreadySent(true);
         setSentToEmail(res.sent_to_email || trimmedEmail);
-        setSentToPhone(res.sent_to_phone || trimmedPhone || null);
+        setSentToPhone(res.sent_to_phone || null);
         toast({
           title: "Details already sent",
           description: res.sent_to_email
@@ -223,6 +228,17 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
             </p>
           </motion.div>
         )}
+
+        {wifiSsid && wifiSecurity ? (
+          <div className="mb-8">
+            <WifiQRCode
+              ssid={wifiSsid}
+              password={wifiPassword}
+              security={wifiSecurity}
+              logoSrc={siteLogoSrc}
+            />
+          </div>
+        ) : null}
 
         {isSuccess && (
           <div className="bg-white rounded-xl p-6 mb-8 shadow-lg text-left">

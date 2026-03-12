@@ -5,6 +5,8 @@ import { VerificationData } from "@/pages/Verify";
 import confetti from "canvas-confetti";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import WifiQRCode from "@/components/WifiQRCode";
+import siteLogoSrc from "@/assets/site-logo.png";
 
 type Props = {
   data: VerificationData;
@@ -33,6 +35,10 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
   const { t } = useTranslation();
 
   const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
+  const anyData = data as any;
+  const wifiSsid = anyData.wifiSsid || anyData.wifi_ssid || null;
+  const wifiPassword = anyData.wifiPassword ?? anyData.wifi_password ?? null;
+  const wifiSecurity = anyData.wifiSecurity || anyData.wifi_security || null;
 
   useEffect(() => {
     confetti({
@@ -54,7 +60,7 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
 
     return () => clearInterval(interval);
   }, [secondsLeft, onHome]);
-
+                                                 
   const accessCode = useMemo(() => {
     console.log("[VisitorResults] Full data object:", data);
     console.log("[VisitorResults] visitorAccessCode:", data.visitorAccessCode);
@@ -154,6 +160,12 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
 
         </div>
       </div>
+
+      {wifiSsid && wifiSecurity ? (
+        <div className="mb-8">
+          <WifiQRCode ssid={wifiSsid} password={wifiPassword} security={wifiSecurity} logoSrc={siteLogoSrc} />
+        </div>
+      ) : null}
 
       {/* Data deletion note */}
       <div className="glass rounded-xl p-4 mb-8">

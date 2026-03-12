@@ -60,6 +60,10 @@ export type VerificationData = {
   checkIn?: string;
   checkOut?: string;
   cloudbedsGuestDetails?: Record<string, string>;
+
+  wifiSsid?: string;
+  wifiPassword?: string | null;
+  wifiSecurity?: string;
 };
 
 const stepFromBackend = (step?: string) => {
@@ -188,6 +192,10 @@ const Verify = () => {
         checkIn: (session as any).cloudbeds_check_in || undefined,
         checkOut: (session as any).cloudbeds_check_out || undefined,
         cloudbedsGuestDetails: (session as any).cloudbeds_guest_details || undefined,
+
+        wifiSsid: (session as any).wifi_ssid || undefined,
+        wifiPassword: (session as any).wifi_password ?? undefined,
+        wifiSecurity: (session as any).wifi_security || undefined,
       });
 
       setPendingFlowType(flowType);
