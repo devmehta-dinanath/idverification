@@ -6,8 +6,9 @@
  *
  * Notes:
  * - This script focuses on verifying that duplicate calls do not error or double-advance.
- * - It does not upload real images; it uses tiny placeholder base64 data and expects the
- *   backend to be in DEV MODE (AWS unavailable) or to have validation disabled in your test setup.
+ * - It does not upload real images; it uses tiny placeholder base64 data.
+ * - With strict AWS verification enabled, replace placeholder data with a real image payload
+ *   in environments where Rekognition/Textract validation is enforced.
  */
 
 const baseUrl = process.argv[2] || "http://localhost:3000";

@@ -8,21 +8,29 @@ import { getGuests, putGuestDocument, addReservationNote, lookupGuestReservation
 import { insertVerifiedGuestRow } from "../verification-log";
 import { getPropertyIdFromRequest } from "./request-utils";
 
-// ── Dev Mode: bypass AWS when credentials are missing ────────────────────────
+// AWS is required for verification flows (Textract/Rekognition/S3)
 const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
 const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
 const AWS_AVAILABLE = Boolean(AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY);
 
 if (!AWS_AVAILABLE) {
-    console.warn("⚠️  [DEV MODE] AWS credentials not found — Rekognition/Textract/S3 will be bypassed with mock data.");
-    console.warn("   AWS_ACCESS_KEY_ID:", AWS_ACCESS_KEY_ID ? `✅ Set (${AWS_ACCESS_KEY_ID.substring(0, 8)}...)` : "❌ Missing");
-    console.warn("   AWS_SECRET_ACCESS_KEY:", AWS_SECRET_ACCESS_KEY ? "✅ Set" : "❌ Missing");
+    console.error("❌ AWS credentials not found — verification endpoints require S3/Textract/Rekognition.");
+    console.error("   AWS_ACCESS_KEY_ID:", AWS_ACCESS_KEY_ID ? `✅ Set (${AWS_ACCESS_KEY_ID.substring(0, 8)}...)` : "❌ Missing");
+    console.error("   AWS_SECRET_ACCESS_KEY:", AWS_SECRET_ACCESS_KEY ? "✅ Set" : "❌ Missing");
 } else {
     console.log("✅ AWS credentials loaded — Textract/Rekognition/S3 enabled");
     console.log("   S3_REGION:", process.env.S3_REGION || process.env.AWS_REGION || "ap-southeast-7 (default)");
     console.log("   REKOGNITION_REGION:", process.env.REKOGNITION_REGION || "ap-southeast-1 (default)");
     console.log("   TEXTRACT_REGION:", process.env.TEXTRACT_REGION || "ap-southeast-1 (default)");
     console.log("   S3_BUCKET_NAME:", process.env.S3_BUCKET_NAME || "⚠️  Not set");
+}
+
+function requireAwsConfigured(res) {
+    if (AWS_AVAILABLE) return true;
+    res.status(503).json({
+        error: "AWS services are not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.",
+    });
+    return false;
 }
 
 export async function handleValidateDocument(req, res) {
@@ -43,19 +51,7 @@ export async function handleValidateDocument(req, res) {
         });
     }
 
-    // ── DEV MODE: bypass AWS ─────────────────────────────────────────────────
-    if (!AWS_AVAILABLE) {
-        console.log("[DEV MODE] validate_document → bypassing AWS, returning mock valid");
-        return res.json({
-            success: true,
-            document_valid: true,
-            has_face: true,
-            is_readable: true,
-            failure_reason: null,
-            face_quality: { brightness: 80, sharpness: 90, confidence: 99 },
-            _dev_mode: true,
-        });
-    }
+    if (!requireAwsConfigured(res)) return;
 
     const textractResult = await runTextractAnalyzeIdWithTimeout(imageBuffer, 15000);
 
@@ -147,17 +143,7 @@ export async function handleValidateSelfie(req, res) {
         });
     }
 
-    // ── DEV MODE: bypass AWS ─────────────────────────────────────────────────
-    if (!AWS_AVAILABLE) {
-        console.log("[DEV MODE] validate_selfie → bypassing AWS, returning mock valid");
-        return res.json({
-            success: true,
-            selfie_valid: true,
-            failure_reason: null,
-            face_details: { brightness: 80, sharpness: 90, eyesOpen: true, confidence: 99 },
-            _dev_mode: true,
-        });
-    }
+    if (!requireAwsConfigured(res)) return;
 
     let selfieValid = false;
     let failureReason = null;
@@ -218,6 +204,7 @@ export async function handleUploadDocument(req, res) {
 
     if (!session_token) return res.status(400).json({ error: "Session token required" });
     if (!image_data) return res.status(400).json({ error: "image_data required" });
+    if (!requireAwsConfigured(res)) return;
 
     const { data: sess, error: sessErr } = await supabase
         .from("demo_sessions")
@@ -279,24 +266,20 @@ export async function handleUploadDocument(req, res) {
     const imageBuffer = Buffer.from(base64Data, "base64");
     const s3Key = `demo/${session_token}/document_${guestIndex}.jpg`;
 
-    // ── S3 upload (skip in dev mode) ─────────────────────────────────────────
-    if (AWS_AVAILABLE) {
-        console.log(`[upload_document] Uploading document to S3: ${s3Key} (${(imageBuffer.length / 1024).toFixed(2)}KB)`);
-        try {
-            await s3.send(
-                new PutObjectCommand({
-                    Bucket: BUCKET,
-                    Key: s3Key,
-                    Body: imageBuffer,
-                    ContentType: "image/jpeg",
-                })
-            );
-            console.log(`[upload_document] ✅ Document uploaded to S3 successfully`);
-        } catch (s3Err) {
-            console.error(`[upload_document] ❌ S3 upload failed:`, s3Err?.message || s3Err);
-        }
-    } else {
-        console.log(`[DEV MODE] upload_document → skipping S3 upload for ${s3Key}`);
+    console.log(`[upload_document] Uploading document to S3: ${s3Key} (${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+    try {
+        await s3.send(
+            new PutObjectCommand({
+                Bucket: BUCKET,
+                Key: s3Key,
+                Body: imageBuffer,
+                ContentType: "image/jpeg",
+            })
+        );
+        console.log(`[upload_document] ✅ Document uploaded to S3 successfully`);
+    } catch (s3Err) {
+        console.error(`[upload_document] ❌ S3 upload failed:`, s3Err?.message || s3Err);
+        return res.status(502).json({ error: "Failed to upload document to storage" });
     }
 
     // ── Push document to Cloudbeds (best-effort) ────────────────────────────
@@ -317,7 +300,7 @@ export async function handleUploadDocument(req, res) {
         }
     }
 
-    const documentUrl = AWS_AVAILABLE ? `s3://${BUCKET}/${s3Key}` : `dev://local/${s3Key}`;
+    const documentUrl = `s3://${BUCKET}/${s3Key}`;
 
     // Only advance to selfie if we're currently at document step.
     // If a duplicate request arrives after we already advanced, don't regress flow.
@@ -386,54 +369,46 @@ export async function handleUploadDocument(req, res) {
         }
     }
 
-    if (AWS_AVAILABLE) {
-        console.log(`[upload_document] Starting Textract OCR for guest ${guestIndex} (async, timeout: 15s)...`);
-        runTextractAnalyzeIdWithTimeout(imageBuffer, 15000).then(async (result) => {
-            if (result.ok) {
-                console.log(`[upload_document] ✅ Textract OCR completed successfully for guest ${guestIndex}`);
-                console.log(`[upload_document] Extracted fields:`, {
-                    name: result.data?.full_name || `${result.data?.first_name || ""} ${result.data?.last_name || ""}`.trim(),
-                    document_number: result.data?.document_number || "N/A",
-                    date_of_birth: result.data?.date_of_birth || "N/A",
-                    nationality: result.data?.nationality || "N/A",
-                });
-            } else {
-                console.warn(`[upload_document] ⚠️  Textract OCR failed for guest ${guestIndex}:`, result.error);
+    console.log(`[upload_document] Starting Textract OCR for guest ${guestIndex} (async, timeout: 15s)...`);
+    runTextractAnalyzeIdWithTimeout(imageBuffer, 15000).then(async (result) => {
+        if (result.ok) {
+            console.log(`[upload_document] ✅ Textract OCR completed successfully for guest ${guestIndex}`);
+            console.log(`[upload_document] Extracted fields:`, {
+                name: result.data?.full_name || `${result.data?.first_name || ""} ${result.data?.last_name || ""}`.trim(),
+                document_number: result.data?.document_number || "N/A",
+                date_of_birth: result.data?.date_of_birth || "N/A",
+                nationality: result.data?.nationality || "N/A",
+            });
+        } else {
+            console.warn(`[upload_document] ⚠️  Textract OCR failed for guest ${guestIndex}:`, result.error);
+        }
+
+        let extractedInfoUpdate = {
+            text: result.ok ? "Textract success" : "Textract failed",
+            textract_ok: result.ok,
+            textract_error: result.ok ? null : result.error,
+            textract: result.ok ? result.data : null,
+            guest_index: guestIndex,
+        };
+
+        if (isVisitorSession) {
+            extractedInfoUpdate.type = "visitor";
+            if (visitorCodeData?.visitor_access_code) {
+                extractedInfoUpdate.access_code = visitorCodeData.visitor_access_code;
             }
+        }
 
-            let extractedInfoUpdate = {
-                text: result.ok ? "Textract success" : "Textract failed",
-                textract_ok: result.ok,
-                textract_error: result.ok ? null : result.error,
-                textract: result.ok ? result.data : null,
-                guest_index: guestIndex,
-            };
-
-            if (isVisitorSession) {
-                extractedInfoUpdate.type = "visitor";
-                if (visitorCodeData?.visitor_access_code) {
-                    extractedInfoUpdate.access_code = visitorCodeData.visitor_access_code;
-                }
-            }
-
-            await supabase
-                .from("demo_sessions")
-                .update({
-                    extracted_info: extractedInfoUpdate,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq("session_token", session_token);
-            console.log(`[upload_document] ✅ OCR result saved in DB: token=${session_token}, guestIndex=${guestIndex}, textract_ok=${result.ok}`);
-        }).catch((err) => {
-            console.error(`[upload_document] ❌ Textract OCR error for guest ${guestIndex}:`, err?.message || err);
-        });
-    } else {
-        console.log("[DEV MODE] upload_document → skipping Textract OCR");
-        const devExtractedInfo = { text: "DEV MODE — Textract skipped", textract_ok: true, textract: { full_name: "Dev Test" }, guest_index: guestIndex };
-        if (isVisitorSession) { devExtractedInfo.type = "visitor"; }
-        await supabase.from("demo_sessions").update({ extracted_info: devExtractedInfo, updated_at: new Date().toISOString() }).eq("session_token", session_token);
-        console.log(`[upload_document] ✅ DEV OCR placeholder saved in DB: token=${session_token}, guestIndex=${guestIndex}`);
-    }
+        await supabase
+            .from("demo_sessions")
+            .update({
+                extracted_info: extractedInfoUpdate,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("session_token", session_token);
+        console.log(`[upload_document] ✅ OCR result saved in DB: token=${session_token}, guestIndex=${guestIndex}, textract_ok=${result.ok}`);
+    }).catch((err) => {
+        console.error(`[upload_document] ❌ Textract OCR error for guest ${guestIndex}:`, err?.message || err);
+    });
 
     return res.json({
         success: true,
@@ -452,6 +427,7 @@ export async function handleVerifyFace(req, res) {
 
     if (!session_token) return res.status(400).json({ error: "Session token required" });
     if (!selfie_data) return res.status(400).json({ error: "selfie_data required" });
+    if (!requireAwsConfigured(res)) return;
 
     const { data: session, error: sessionError } = await supabase
         .from("demo_sessions")
@@ -512,43 +488,33 @@ export async function handleVerifyFace(req, res) {
     const selfieBuffer = Buffer.from(selfieBase64, "base64");
     const selfieKey = `demo/${session_token}/selfie_${guestIndex}.jpg`;
 
-    if (!AWS_AVAILABLE) {
-        // ── DEV MODE: skip S3 + Rekognition, mock a successful verification ──
-        console.log(`[DEV MODE] verify_face → bypassing AWS, auto-verifying guest ${guestIndex}`);
-        similarity = 0.95;
-        livenessScore = 0.98;
-        isLive = true;
-        verificationScore = 0.4 + 0.98 * 0.3 + 0.95 * 0.3;
-        guest_verified = true;
-    } else {
-        let docBuffer;
-        try {
-            const docObj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: docKey }));
-            docBuffer = await streamToBuffer(docObj.Body);
-        } catch {
-            return res.status(400).json({ error: "ID document not found. Upload it first." });
-        }
-
-        await s3.send(new PutObjectCommand({
-            Bucket: BUCKET, Key: selfieKey, Body: selfieBuffer, ContentType: "image/jpeg",
-        }));
-
-        const livenessResult = await rekognition.send(new DetectFacesCommand({
-            Image: { Bytes: selfieBuffer }, Attributes: ["ALL"],
-        }));
-
-        const face = livenessResult.FaceDetails?.[0];
-        isLive = Boolean(face?.EyesOpen?.Value) && (face?.Quality?.Brightness || 0) > 40;
-        livenessScore = (face?.Confidence || 0) / 100;
-
-        const compareResult = await rekognition.send(new CompareFacesCommand({
-            SourceImage: { Bytes: selfieBuffer }, TargetImage: { Bytes: docBuffer }, SimilarityThreshold: 80,
-        }));
-
-        similarity = (compareResult.FaceMatches?.[0]?.Similarity || 0) / 100;
-        verificationScore = (isLive ? 0.4 : 0) + livenessScore * 0.3 + similarity * 0.3;
-        guest_verified = isLive && similarity >= 0.65;
+    let docBuffer;
+    try {
+        const docObj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: docKey }));
+        docBuffer = await streamToBuffer(docObj.Body);
+    } catch {
+        return res.status(400).json({ error: "ID document not found. Upload it first." });
     }
+
+    await s3.send(new PutObjectCommand({
+        Bucket: BUCKET, Key: selfieKey, Body: selfieBuffer, ContentType: "image/jpeg",
+    }));
+
+    const livenessResult = await rekognition.send(new DetectFacesCommand({
+        Image: { Bytes: selfieBuffer }, Attributes: ["ALL"],
+    }));
+
+    const face = livenessResult.FaceDetails?.[0];
+    isLive = Boolean(face?.EyesOpen?.Value) && (face?.Quality?.Brightness || 0) > 40;
+    livenessScore = (face?.Confidence || 0) / 100;
+
+    const compareResult = await rekognition.send(new CompareFacesCommand({
+        SourceImage: { Bytes: selfieBuffer }, TargetImage: { Bytes: docBuffer }, SimilarityThreshold: 80,
+    }));
+
+    similarity = (compareResult.FaceMatches?.[0]?.Similarity || 0) / 100;
+    verificationScore = (isLive ? 0.4 : 0) + livenessScore * 0.3 + similarity * 0.3;
+    guest_verified = isLive && similarity >= 0.65;
 
     const verifiedAfter = guest_verified ? Math.min(verifiedBefore + 1, expected) : verifiedBefore;
     const requiresAdditionalGuest = verifiedAfter < expected;
@@ -556,7 +522,7 @@ export async function handleVerifyFace(req, res) {
 
     // Optimistic locking: only apply this transition if verified_guest_count is still what we read.
     // Prevents double-increment from duplicate/concurrent submissions.
-    const selfieUrl = AWS_AVAILABLE ? `s3://${BUCKET}/${selfieKey}` : `dev://local/${selfieKey}`;
+    const selfieUrl = `s3://${BUCKET}/${selfieKey}`;
     const { data: updated, error: updateErr } = await supabase
         .from("demo_sessions")
         .update({
