@@ -5,8 +5,6 @@ import { VerificationData } from "@/pages/Verify";
 import confetti from "canvas-confetti";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import WifiQRCode from "@/components/WifiQRCode";
-import siteLogoSrc from "@/assets/site-logo.png";
 
 type Props = {
   data: VerificationData;
@@ -35,10 +33,6 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
   const { t } = useTranslation();
 
   const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
-  const anyData = data as any;
-  const wifiSsid = anyData.wifiSsid || anyData.wifi_ssid || null;
-  const wifiPassword = anyData.wifiPassword ?? anyData.wifi_password ?? null;
-  const wifiSecurity = anyData.wifiSecurity || anyData.wifi_security || null;
 
   useEffect(() => {
     confetti({
@@ -71,13 +65,13 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
       return "PENDING";
     }
     return raw;
-  }, [data, data.visitorAccessCode]);
+  }, [data]);
 
-  const grantedAtLabel = useMemo(() => formatTimeHHMM((data as any)?.visitorAccessGrantedAt), [data]);
+  const grantedAtLabel = useMemo(() => formatTimeHHMM(data.visitorAccessGrantedAt), [data]);
 
-  const expiresAtLabel = useMemo(() => formatTimeHHMM((data as any)?.visitorAccessExpiresAt), [data]);
+  const expiresAtLabel = useMemo(() => formatTimeHHMM(data.visitorAccessExpiresAt), [data]);
 
-  const remainingMins = useMemo(() => minutesRemaining((data as any)?.visitorAccessExpiresAt), [data]);
+  const remainingMins = useMemo(() => minutesRemaining(data.visitorAccessExpiresAt), [data]);
 
   const windowLine = useMemo(() => {
     if (grantedAtLabel && expiresAtLabel) return `${grantedAtLabel} – ${expiresAtLabel}`;
@@ -160,12 +154,6 @@ const VisitorResultsStep = ({ data, onHome }: Props) => {
 
         </div>
       </div>
-
-      {wifiSsid && wifiSecurity ? (
-        <div className="mb-8">
-          <WifiQRCode ssid={wifiSsid} password={wifiPassword} security={wifiSecurity} logoSrc={siteLogoSrc} />
-        </div>
-      ) : null}
 
       {/* Data deletion note */}
       <div className="glass rounded-xl p-4 mb-8">

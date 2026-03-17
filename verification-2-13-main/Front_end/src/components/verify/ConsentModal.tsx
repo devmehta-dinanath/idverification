@@ -17,6 +17,20 @@ interface ConsentModalProps {
 
 const RETRY_DELAYS = [1000, 3000, 5000];
 
+const getPropertyExternalIdFromUrl = (): string | undefined => {
+  if (typeof window === "undefined") return undefined;
+
+  const params = new URLSearchParams(window.location.search);
+  const propertyExternalId =
+    params.get("property_external_id") ||
+    params.get("property") ||
+    undefined;
+
+  if (!propertyExternalId) return undefined;
+  const trimmed = propertyExternalId.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onCancel }: ConsentModalProps) => {
   const [isChecked, setIsChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,6 +68,16 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
 
     try {
       let sessionToken: string;
+      const propertyExternalId = getPropertyExternalIdFromUrl();
+
+      if (propertyExternalId) {
+        try {
+          // Persist once so API client can send X-Property-ID on later calls.
+          sessionStorage.setItem("opsian_property_id", propertyExternalId);
+        } catch {
+          // ignore storage errors
+        }
+      }
 
       // If we have an existing session token, reuse it instead of creating new
       if (existingSessionToken) {
@@ -62,7 +86,19 @@ const ConsentModal = ({ flowType = "guest", existingSessionToken, onConsent, onC
       } else {
         // STEP 1 — create session (MUST succeed)
         console.log("[Consent] Starting NEW session with flowType:", flowType);
-        const startRes = await api.verify({ action: "start", flow_type: flowType });
+        const startPayload =
+          flowType === "visitor"
+            ? {
+                action: "start_visitor" as const,
+                ...(propertyExternalId ? { property_external_id: propertyExternalId } : {}),
+              }
+            : {
+                action: "start" as const,
+                flow_type: flowType,
+                ...(propertyExternalId ? { property_external_id: propertyExternalId } : {}),
+              };
+
+        const startRes = await api.verify(startPayload);
         console.log("[Consent] start response:", startRes);
 
         sessionToken = startRes.session_token;
