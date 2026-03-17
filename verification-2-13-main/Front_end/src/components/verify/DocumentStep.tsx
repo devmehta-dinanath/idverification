@@ -46,6 +46,8 @@ const DocumentStep = ({ data, updateData, onNext, onBack, onError }: Props) => {
         return t('document.errorTooDark');
       case "image_too_small":
         return t('document.errorTooSmall');
+      case "name_mismatch":
+        return t('document.errorNameMismatch');
       case "image_too_large":
         return t('document.errorImageTooLarge') || "Image size is too large. Please move slightly further away.";
       case "optimization_failed":
