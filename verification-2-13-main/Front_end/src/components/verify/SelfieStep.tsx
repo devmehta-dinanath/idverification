@@ -35,6 +35,17 @@ const parseNum = (val: unknown): number | undefined => {
   return undefined;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> => {
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return {};
+};
+
+const asString = (value: unknown): string | undefined => {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+};
+
 const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: Props) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -122,12 +133,14 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
         const validationResponse = await api.verify({
           action: "validate_selfie",
           image_data: cleanBase64,
-        } as any);
+        });
 
         console.log("[Selfie] Validation response:", validationResponse);
 
-        if (!(validationResponse as any).selfie_valid) {
-          const reason = (validationResponse as any).failure_reason || "unknown";
+        const validationData = asRecord(validationResponse);
+
+        if (!parseBool(validationData.selfie_valid)) {
+          const reason = asString(validationData.failure_reason) || "unknown";
           console.log("[Selfie] Validation FAILED:", reason);
           toast({
             title: t('selfie.validationFailed'),
@@ -165,6 +178,8 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
 
       // Extract from response OR response.data (resilient parsing)
       const responseData = response.data || {};
+      const responseRecord = asRecord(response);
+      const responseDataRecord = asRecord(responseData);
 
       // Parse scores defensively from flat fields or nested data
       const livenessScore = responseData.liveness_score ?? response.liveness_score;
@@ -229,11 +244,13 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
       console.log("[Selfie] Raw get_session response:", JSON.stringify(sessionRes, null, 2));
 
       const session = sessionRes.session;
+      const sessionRecord = asRecord(session);
 
       // Extract visitor access code from response (for visitor flow)
-      const visitorAccessCode = (response as any).access_code ||
-        (responseData as any).access_code ||
-        (session as any)?.visitor_access_code;
+      const visitorAccessCode =
+        asString(responseRecord.access_code) ||
+        asString(responseDataRecord.access_code) ||
+        asString(sessionRecord.visitor_access_code);
 
       if (!session) {
         console.error("[Selfie] No session in get_session response");
@@ -286,34 +303,34 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
 
       // Extract Cloudbeds integration fields
       const physicalRoom =
-        (response as any).physical_room ||
-        (responseData as any).physical_room ||
-        (session as any)?.physical_room;
+        asString(responseRecord.physical_room) ||
+        asString(responseDataRecord.physical_room) ||
+        asString(sessionRecord.physical_room);
 
       const roomAccessCode =
-        (response as any).room_access_code ||
-        (responseData as any).room_access_code ||
-        (session as any)?.room_access_code;
+        asString(responseRecord.room_access_code) ||
+        asString(responseDataRecord.room_access_code) ||
+        asString(sessionRecord.room_access_code);
 
       const cloudbedsReservationId =
-        (response as any).cloudbeds_reservation_id ||
-        (responseData as any).cloudbeds_reservation_id ||
-        (session as any)?.cloudbeds_reservation_id;
+        asString(responseRecord.cloudbeds_reservation_id) ||
+        asString(responseDataRecord.cloudbeds_reservation_id) ||
+        asString(sessionRecord.cloudbeds_reservation_id);
 
       const roomTypeName =
-        (response as any).room_type_name ||
-        (responseData as any).room_type_name ||
-        (session as any)?.room_type_name;
+        asString(responseRecord.room_type_name) ||
+        asString(responseDataRecord.room_type_name) ||
+        asString(sessionRecord.room_type_name);
 
       const checkIn =
-        (response as any).check_in ||
-        (responseData as any).check_in ||
-        (session as any)?.cloudbeds_check_in;
+        asString(responseRecord.check_in) ||
+        asString(responseDataRecord.check_in) ||
+        asString(sessionRecord.cloudbeds_check_in);
 
       const checkOut =
-        (response as any).check_out ||
-        (responseData as any).check_out ||
-        (session as any)?.cloudbeds_check_out;
+        asString(responseRecord.check_out) ||
+        asString(responseDataRecord.check_out) ||
+        asString(sessionRecord.cloudbeds_check_out);
 
       // Update state with verified data (including visitor access code and Cloudbeds fields)
       updateData({
@@ -327,7 +344,7 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
         verifiedGuestCount: authVerifiedGuestCount,
         expectedGuestCount: authExpectedGuestCount,
         guestIndex: authGuestIndex,
-        visitorAccessCode: visitorAccessCode || (session as any).visitor_access_code,
+        visitorAccessCode: visitorAccessCode || asString(sessionRecord.visitor_access_code),
         physicalRoom,
         roomAccessCode,
         cloudbedsReservationId,

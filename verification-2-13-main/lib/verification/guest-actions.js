@@ -114,6 +114,30 @@ export async function handleUpdateGuest(req, res) {
         });
     }
 
+    const reservationStatusRaw = cbResult.status == null ? "" : String(cbResult.status);
+    const reservationStatus = reservationStatusRaw.trim().toLowerCase();
+    const normalizedStatus = reservationStatus.replace(/[\s_-]+/g, "");
+
+    const isInHouse = normalizedStatus === "inhouse" || normalizedStatus === "checkedin";
+    const isCheckedOut = normalizedStatus === "checkedout";
+    const isConfirmationPending = normalizedStatus === "confirmationpending";
+    const isCancelled = normalizedStatus === "cancelled" || normalizedStatus === "canceled";
+
+    if (isInHouse || isCheckedOut || isConfirmationPending || isCancelled) {
+        const reason = isInHouse
+            ? "This reservation is already checked in (in-house). Verification cannot be started."
+            : isCheckedOut
+                ? "This reservation is already checked out. Verification cannot be started."
+                : isConfirmationPending
+                    ? "This reservation is confirmation pending. Verification cannot be started."
+                : "This reservation is cancelled. Verification cannot be started.";
+
+        return res.status(409).json({
+            error: reason,
+            reservation_status: reservationStatusRaw || null,
+        });
+    }
+
     const adultsFromCB = clampInt(cbResult.adults, 1, 10);
     const childrenFromCB = clampInt(cbResult.children, 0, 10);
 

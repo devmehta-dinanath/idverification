@@ -56,7 +56,7 @@ const WelcomeStep = ({ data, updateData, onNext, onError }: Props) => {
 
       toast({
         title: "Error",
-        description: "Could not save your details. Please check your connection and try again.",
+        description: error.message || "Could not save your details. Please check your connection and try again.",
         variant: "destructive",
       });
 
