@@ -105,6 +105,7 @@
     "errorNotAnId": "This doesn't appear to be an ID document. Please take a clear photo of your passport or national ID card.",
     "errorNoFace": "No photo detected on the document. Please ensure the photo on your ID is clearly visible.",
     "errorNotReadable": "The text on your document is not readable. Please retake in better lighting with the document flat.",
+    "errorNameMismatch": "The name on the document does not match the guest name. Please use an ID that matches the reservation.",
     "errorBlurry": "The document photo is too blurry. Please hold your device steady and ensure the document is in focus.",
     "errorTooSmall": "The image is too small. Please move closer to the document and retake.",
     "errorImageTooLarge": "The image file size is too large. Please try moving your camera slightly further away.",

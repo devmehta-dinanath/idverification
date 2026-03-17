@@ -1,6 +1,6 @@
 import { supabase } from "../supabase";
 import { s3, rekognition, runTextractAnalyzeIdWithTimeout, BUCKET } from "../aws";
-import { normalizeBase64, clampInt, streamToBuffer } from "../utils";
+import { normalizeBase64, normalizeGuestName, clampInt, streamToBuffer } from "../utils";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CompareFacesCommand, DetectFacesCommand } from "@aws-sdk/client-rekognition";
 import { getAccessCode } from "../access-codes";
@@ -88,14 +88,20 @@ export async function handleValidateDocument(req, res) {
     }
 
     let isVisitorFlow = false;
+    let sessionGuestName = null;
+    let isFirstGuest = true;
     if (session_token) {
         try {
             const { data: sess } = await supabase
                 .from("demo_sessions")
-                .select("extracted_info, room_number")
+                .select("extracted_info, room_number, guest_name, expected_guest_count, verified_guest_count")
                 .eq("session_token", session_token)
                 .single();
             isVisitorFlow = sess?.extracted_info?.type === "visitor" || sess?.room_number === "VISITOR";
+            sessionGuestName = sess?.guest_name || null;
+            const expected = clampInt(sess?.expected_guest_count, 1, 10);
+            const verified = clampInt(sess?.verified_guest_count, 0, 10);
+            isFirstGuest = expected <= 1 || verified === 0;
         } catch (e) {
             console.warn("[validate_document] Could not fetch session for flow detection:", e.message);
         }
@@ -117,6 +123,30 @@ export async function handleValidateDocument(req, res) {
         failureReason = "too_blurry";
     }
 
+    // Guest flow: require document name to match the guest name only for the first guest (multi-guest: only guest 1 is checked)
+    if (documentValid && !isVisitorFlow && isFirstGuest && sessionGuestName && textractResult.ok && textractResult.data) {
+        const d = textractResult.data;
+        const docName = (d.full_name || `${(d.first_name || "").trim()} ${(d.last_name || "").trim()}`.trim()).trim();
+        if (docName) {
+            const normalizedGuest = normalizeGuestName(sessionGuestName);
+            const normalizedDoc = normalizeGuestName(docName);
+            const isMismatch = normalizedGuest && normalizedDoc && normalizedGuest !== normalizedDoc;
+            console.log("[validate_document] Name check: sessionGuestName=%s docName=%s normalizedGuest=%s normalizedDoc=%s mismatch=%s", sessionGuestName, docName, normalizedGuest, normalizedDoc, isMismatch);
+            if (isMismatch) {
+                documentValid = false;
+                failureReason = "name_mismatch";
+            }
+        }
+    } else if (documentValid && !isVisitorFlow && session_token) {
+        console.log("[validate_document] Name check skipped: sessionGuestName=%s isFirstGuest=%s textractOk=%s", sessionGuestName, isFirstGuest, textractResult?.ok);
+    }
+
+    // Ensure we always send a specific reason when validation fails (so frontend can show the right message)
+    if (!documentValid && !failureReason) {
+        failureReason = isReadable ? "no_face_detected" : "not_readable";
+    }
+
+    console.log("[validate_document] Response: document_valid=%s failure_reason=%s has_face=%s is_readable=%s", documentValid, failureReason, hasFace, isReadable);
     return res.json({
         success: true,
         document_valid: documentValid,
