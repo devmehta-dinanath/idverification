@@ -130,13 +130,23 @@ export async function handleValidateDocument(req, res) {
         if (docName) {
             const normalizedGuest = normalizeGuestName(sessionGuestName);
             const normalizedDoc = normalizeGuestName(docName);
-            if (normalizedGuest && normalizedDoc && normalizedGuest !== normalizedDoc) {
+            const isMismatch = normalizedGuest && normalizedDoc && normalizedGuest !== normalizedDoc;
+            console.log("[validate_document] Name check: sessionGuestName=%s docName=%s normalizedGuest=%s normalizedDoc=%s mismatch=%s", sessionGuestName, docName, normalizedGuest, normalizedDoc, isMismatch);
+            if (isMismatch) {
                 documentValid = false;
                 failureReason = "name_mismatch";
             }
         }
+    } else if (documentValid && !isVisitorFlow && session_token) {
+        console.log("[validate_document] Name check skipped: sessionGuestName=%s isFirstGuest=%s textractOk=%s", sessionGuestName, isFirstGuest, textractResult?.ok);
     }
 
+    // Ensure we always send a specific reason when validation fails (so frontend can show the right message)
+    if (!documentValid && !failureReason) {
+        failureReason = isReadable ? "no_face_detected" : "not_readable";
+    }
+
+    console.log("[validate_document] Response: document_valid=%s failure_reason=%s has_face=%s is_readable=%s", documentValid, failureReason, hasFace, isReadable);
     return res.json({
         success: true,
         document_valid: documentValid,

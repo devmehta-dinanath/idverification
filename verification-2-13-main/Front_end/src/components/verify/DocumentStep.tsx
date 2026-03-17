@@ -52,6 +52,8 @@ const DocumentStep = ({ data, updateData, onNext, onBack, onError }: Props) => {
         return t('document.errorImageTooLarge') || "Image size is too large. Please move slightly further away.";
       case "optimization_failed":
         return t('document.errorImageProcessing');
+      case "unknown":
+        return t('document.errorGeneric');
       default:
         return t('document.errorGeneric');
     }
@@ -107,8 +109,8 @@ const DocumentStep = ({ data, updateData, onNext, onBack, onError }: Props) => {
         console.log("[Document] Validation response:", validationResponse);
 
         if (!(validationResponse as any).document_valid) {
-          const reason = (validationResponse as any).failure_reason || "unknown";
-          console.log("[Document] Validation FAILED:", reason);
+          const reason = (validationResponse as any).failure_reason ?? "unknown";
+          console.log("[Document] Validation FAILED:", reason, "full response:", validationResponse);
           toast({
             title: t('document.validationFailed'),
             description: getDocumentErrorMessage(reason),
