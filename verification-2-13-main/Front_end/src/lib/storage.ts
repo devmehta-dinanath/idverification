@@ -35,3 +35,8 @@ export const setApiBaseUrl = (url: string): void => {
 export const clearApiBaseUrlOverride = (): void => {
   localStorage.removeItem(API_BASE_URL_OVERRIDE_KEY);
 };
+
+export const resetApiBaseUrl = (): void => {
+  localStorage.removeItem(API_BASE_URL_KEY);
+  localStorage.removeItem(API_BASE_URL_OVERRIDE_KEY);
+};

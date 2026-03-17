@@ -1,9 +1,12 @@
 const fetch = require('node-fetch');
 
+const PORT = process.env.PORT || '3000';
+const API_URL = process.env.API_URL || `http://localhost:${PORT}/api/verify`;
+
 async function checkApi() {
     try {
-        console.log("Testing POST /api/verify...");
-        const res = await fetch('http://localhost:3001/api/verify', {
+        console.log(`Testing POST ${API_URL}...`);
+        const res = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'start', type: 'guest' })

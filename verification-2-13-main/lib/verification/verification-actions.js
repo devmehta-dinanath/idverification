@@ -214,6 +214,8 @@ export async function handleValidateSelfie(req, res) {
 export async function handleUploadDocument(req, res) {
     const { session_token, image_data } = req.body || {};
 
+    console.log(`[upload_document] ▶️ Request received: token=${session_token || "missing"}`);
+
     if (!session_token) return res.status(400).json({ error: "Session token required" });
     if (!image_data) return res.status(400).json({ error: "image_data required" });
 
@@ -247,6 +249,7 @@ export async function handleUploadDocument(req, res) {
     const expected = clampInt(sess.expected_guest_count, 1, 10);
     const verifiedBefore = clampInt(sess.verified_guest_count, 0, 10);
     const guestIndex = clampInt(verifiedBefore + 1, 1, expected);
+    console.log(`[upload_document] Session state before upload: token=${session_token}, verified=${verifiedBefore}/${expected}, guestIndex=${guestIndex}, current_step=${sess.current_step}`);
 
     // ── Idempotency / duplicate submission guard ─────────────────────────────
     // NOTE: document_url is stored at session-level (overwritten per guest in current design),
@@ -350,6 +353,8 @@ export async function handleUploadDocument(req, res) {
             visitor_access_granted_at: sess.visitor_access_granted_at || null,
             visitor_access_expires_at: sess.visitor_access_expires_at || null,
         });
+    } else {
+        console.log(`[upload_document] ✅ DB updated: token=${session_token}, step=selfie, status=document_uploaded, document_url=${documentUrl}`);
     }
 
     const isVisitorSession = sess.extracted_info?.type === "visitor" || sess.room_number === "VISITOR";
@@ -377,6 +382,7 @@ export async function handleUploadDocument(req, res) {
                     updated_at: new Date().toISOString()
                 })
                 .eq("session_token", session_token);
+            console.log(`[upload_document] ✅ Visitor access code saved in DB: token=${session_token}`);
         }
     }
 
@@ -417,6 +423,7 @@ export async function handleUploadDocument(req, res) {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("session_token", session_token);
+            console.log(`[upload_document] ✅ OCR result saved in DB: token=${session_token}, guestIndex=${guestIndex}, textract_ok=${result.ok}`);
         }).catch((err) => {
             console.error(`[upload_document] ❌ Textract OCR error for guest ${guestIndex}:`, err?.message || err);
         });
@@ -425,6 +432,7 @@ export async function handleUploadDocument(req, res) {
         const devExtractedInfo = { text: "DEV MODE — Textract skipped", textract_ok: true, textract: { full_name: "Dev Test" }, guest_index: guestIndex };
         if (isVisitorSession) { devExtractedInfo.type = "visitor"; }
         await supabase.from("demo_sessions").update({ extracted_info: devExtractedInfo, updated_at: new Date().toISOString() }).eq("session_token", session_token);
+        console.log(`[upload_document] ✅ DEV OCR placeholder saved in DB: token=${session_token}, guestIndex=${guestIndex}`);
     }
 
     return res.json({
@@ -440,6 +448,8 @@ export async function handleUploadDocument(req, res) {
 export async function handleVerifyFace(req, res) {
     const { session_token, selfie_data } = req.body || {};
 
+    console.log(`[verify_face] ▶️ Request received: token=${session_token || "missing"}`);
+
     if (!session_token) return res.status(400).json({ error: "Session token required" });
     if (!selfie_data) return res.status(400).json({ error: "selfie_data required" });
 
@@ -454,6 +464,7 @@ export async function handleVerifyFace(req, res) {
     const expected = clampInt(session.expected_guest_count, 1, 10);
     const verifiedBefore = clampInt(session.verified_guest_count, 0, 10);
     const guestIndex = clampInt(verifiedBefore + 1, 1, expected);
+    console.log(`[verify_face] Session state before verification: token=${session_token}, verified=${verifiedBefore}/${expected}, guestIndex=${guestIndex}, current_step=${session.current_step}`);
     const docKey = `demo/${session_token}/document_${guestIndex}.jpg`;
 
     // ── Idempotency / duplicate submission guard ─────────────────────────────
@@ -464,6 +475,13 @@ export async function handleVerifyFace(req, res) {
         session.is_verified === true ||
         verifiedBefore >= expected;
 
+    const finalizedSessionDetails = {
+        physical_room: session.physical_room || null,
+        room_type_name: session.room_type_name || null,
+        check_in: session.cloudbeds_check_in || null,
+        check_out: session.cloudbeds_check_out || null,
+    };
+
     if (terminal) {
         return res.json({
             success: true,
@@ -472,6 +490,7 @@ export async function handleVerifyFace(req, res) {
             already_verified: true,
             access_code: session.room_access_code || null,
             room_access_code: session.room_access_code || null,
+            ...finalizedSessionDetails,
         });
     }
 
@@ -559,13 +578,20 @@ export async function handleVerifyFace(req, res) {
     const updateApplied = !updateErr && updated && updated.length > 0;
     if (updateErr) {
         console.warn("[verify_face] update failed (continuing):", updateErr.message);
+    } else if (updateApplied) {
+        console.log(
+            `[verify_face] ✅ DB updated: token=${session_token}, status=${guest_verified ? (requiresAdditionalGuest ? "partial_verified" : "verified") : "failed"}, next_step=${next_step}, verified=${verifiedAfter}/${expected}, score=${(verificationScore * 100).toFixed(1)}%`
+        );
     }
 
     let access_code = null;
+    let finalizedDetails = { ...finalizedSessionDetails };
     if (verifiedAfter >= expected) {
+        console.log(`[verify_face] All required guests verified for token=${session_token}. Door code lookup starts now (final step).`);
         // If a prior call already issued a code, reuse it.
         if (session.room_access_code) {
             access_code = session.room_access_code;
+            console.log(`[verify_face] Reusing existing room_access_code from DB: token=${session_token}`);
         }
         // Fetch Cloudbeds IDs from session for door lock lookup
         let cb_prop_id_for_code = null;
@@ -594,7 +620,35 @@ export async function handleVerifyFace(req, res) {
                     visitor_access_granted_at: now.toISOString(),
                     visitor_access_expires_at: expiresAt.toISOString(),
                 }).eq("session_token", session_token);
+                console.log(`[verify_face] ✅ Door code generated and saved in DB at final step: token=${session_token}`);
+            } else {
+                console.warn(`[verify_face] ⚠️ Door code not available at final step: token=${session_token}`);
             }
+        }
+
+        try {
+            if (session.cloudbeds_reservation_id) {
+                const headerPropertyId = getPropertyIdFromRequest(req);
+                const propertyIdForLookup =
+                    headerPropertyId || session.cloudbeds_property_id || session.property_external_id || null;
+
+                const latestStay = await lookupGuestReservation(
+                    session.guest_name,
+                    session.cloudbeds_reservation_id,
+                    propertyIdForLookup ? { propertyID: propertyIdForLookup } : undefined
+                );
+
+                if (latestStay?.found) {
+                    finalizedDetails = {
+                        physical_room: latestStay.roomName || latestStay.roomNumber || session.physical_room || session.room_number || null,
+                        room_type_name: latestStay.roomTypeName || session.room_type_name || null,
+                        check_in: latestStay.checkIn || session.cloudbeds_check_in || null,
+                        check_out: latestStay.checkOut || session.cloudbeds_check_out || null,
+                    };
+                }
+            }
+        } catch (stayErr) {
+            console.warn("[verify_face] Final stay-details lookup failed (non-fatal):", stayErr?.message || stayErr);
         }
     }
 
@@ -716,8 +770,18 @@ export async function handleVerifyFace(req, res) {
             already_verified: true,
             access_code: session.room_access_code || access_code,
             room_access_code: session.room_access_code || access_code,
+            ...(verifiedAfter >= expected ? finalizedDetails : {}),
         });
     }
 
-    return res.json({ success: true, guest_verified, next_step, access_code, room_access_code: access_code, is_verified: verifiedAfter >= expected, requires_additional_guest: requiresAdditionalGuest });
+    return res.json({
+        success: true,
+        guest_verified,
+        next_step,
+        access_code,
+        room_access_code: access_code,
+        is_verified: verifiedAfter >= expected,
+        requires_additional_guest: requiresAdditionalGuest,
+        ...(verifiedAfter >= expected ? finalizedDetails : {}),
+    });
 }

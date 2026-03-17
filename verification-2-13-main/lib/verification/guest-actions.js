@@ -1,7 +1,34 @@
 import { supabase } from "../supabase";
 import { normalizeGuestName, normalizeReservationNumber, clampInt, toIntOrNull } from "../utils";
-import { lookupGuestReservation, getDoorLockAccessCode } from "../cloudbeds";
+import { lookupGuestReservation } from "../cloudbeds";
 import { getPropertyIdFromRequest } from "./request-utils";
+
+let demoSessionColumnCache = null;
+
+async function getDemoSessionColumns() {
+    if (demoSessionColumnCache) return demoSessionColumnCache;
+
+    try {
+        const { data, error } = await supabase
+            .from("demo_sessions")
+            .select("*")
+            .limit(1);
+
+        if (error) {
+            console.warn("[update_guest] Could not inspect demo_sessions columns:", error.message);
+            demoSessionColumnCache = new Set();
+            return demoSessionColumnCache;
+        }
+
+        const firstRow = data && data.length > 0 ? data[0] : null;
+        demoSessionColumnCache = new Set(firstRow ? Object.keys(firstRow) : []);
+        return demoSessionColumnCache;
+    } catch (e) {
+        console.warn("[update_guest] Column inspection failed:", e?.message || e);
+        demoSessionColumnCache = new Set();
+        return demoSessionColumnCache;
+    }
+}
 
 export async function handleUpdateGuest(req, res) {
     const { session_token, guest_name, booking_ref, room_number, expected_guest_count, flow_type, visitor_first_name, visitor_last_name, visitor_phone, visitor_reason } =
@@ -48,6 +75,8 @@ export async function handleUpdateGuest(req, res) {
             return res.status(500).json({ error: "Failed to save visitor info" });
         }
 
+        console.log(`[update_guest] ✅ Visitor session updated in DB: token=${session_token}, step=document, status=visitor_info_saved`);
+
         return res.json({
             success: true,
             flow_type: "visitor",
@@ -91,21 +120,7 @@ export async function handleUpdateGuest(req, res) {
     const expectedOverride = toIntOrNull(expected_guest_count);
     const expectedToSet = expectedOverride === null ? adultsFromCB : clampInt(expectedOverride, 1, 10);
 
-    // Fetch door lock access code from Cloudbeds Door Locks API (GET doorlock/v1/keys/{propertyID})
-    let room_access_code = null;
     let physical_room = cbResult.roomName || cbResult.roomNumber || null;
-    try {
-        room_access_code = await getDoorLockAccessCode(
-            cbResult.propertyID,
-            cbResult.roomNumber,
-            cbResult.reservationId
-        );
-        if (room_access_code) {
-            console.log(`[update_guest] Room access code from Cloudbeds door lock API for reservation ${cbResult.reservationId}`);
-        }
-    } catch (err) {
-        console.warn("[update_guest] Door lock code fetch failed (non-fatal):", err?.message);
-    }
 
     // Core payload – only columns guaranteed to exist in the DB
     const updatePayload = {
@@ -120,7 +135,6 @@ export async function handleUpdateGuest(req, res) {
         cloudbeds_reservation_id: cbResult.reservationId,
         cloudbeds_property_id: cbResult.propertyID,
         physical_room,
-        room_access_code: room_access_code || undefined,
         updated_at: new Date().toISOString(),
     };
 
@@ -134,19 +148,33 @@ export async function handleUpdateGuest(req, res) {
         return res.status(500).json({ error: "Failed to save guest info" });
     }
 
-    // Attempt to persist extended Cloudbeds columns (non-fatal if columns don't exist yet)
+    console.log(
+        `[update_guest] ✅ Session updated in DB: token=${session_token}, reservation=${cbResult.reservationId}, room=${cbResult.roomNumber || bookingValue}, step=document, status=guest_info_saved`
+    );
+
+    // Attempt to persist extended Cloudbeds columns only if they exist in this DB.
     const extendedPayload = {
         room_type_name: cbResult.roomTypeName || null,
         cloudbeds_check_in: cbResult.checkIn || null,
         cloudbeds_check_out: cbResult.checkOut || null,
         cloudbeds_guest_details: cbResult.guestDetails || null,
     };
-    const { error: extErr } = await supabase
-        .from("demo_sessions")
-        .update(extendedPayload)
-        .eq("session_token", session_token);
-    if (extErr) {
-        console.warn("[update_guest] Extended columns not saved (run setup.sql migrations):", extErr.message);
+
+    const existingColumns = await getDemoSessionColumns();
+    const filteredExtendedPayload = Object.fromEntries(
+        Object.entries(extendedPayload).filter(([key]) => existingColumns.has(key))
+    );
+
+    if (Object.keys(filteredExtendedPayload).length > 0) {
+        const { error: extErr } = await supabase
+            .from("demo_sessions")
+            .update(filteredExtendedPayload)
+            .eq("session_token", session_token);
+        if (extErr) {
+            console.warn("[update_guest] Extended columns update skipped:", extErr.message);
+        } else {
+            console.log(`[update_guest] ✅ Extended Cloudbeds fields saved in DB: token=${session_token}, fields=${Object.keys(filteredExtendedPayload).join(",")}`);
+        }
     }
 
     return res.json({
@@ -157,13 +185,6 @@ export async function handleUpdateGuest(req, res) {
         verified_guest_count: verified,
         requires_additional_guest: verified < expectedToSet,
         remaining_guest_verifications: Math.max(expectedToSet - verified, 0),
-        // Pass Cloudbeds details through response so frontend has them even without DB columns
-        physical_room,
-        room_type_name: cbResult.roomTypeName || null,
-        check_in: cbResult.checkIn || null,
-        check_out: cbResult.checkOut || null,
-        cloudbeds_guest_details: cbResult.guestDetails || null,
-        room_access_code: room_access_code || null,
     });
 }
 

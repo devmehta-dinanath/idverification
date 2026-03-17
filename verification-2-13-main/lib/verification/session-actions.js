@@ -15,6 +15,7 @@ export async function handleStartVisitor(req, res) {
     const verified_guest_count = 0;
     const requires_additional_guest = false;
 
+    console.log(`[start_visitor] Creating session in DB: token=${token}, property_external_id=${property_external_id || "none"}`);
     const { error } = await supabase.from("demo_sessions").insert({
         session_token: token,
         status: "started",
@@ -32,6 +33,8 @@ export async function handleStartVisitor(req, res) {
         console.error("Error creating visitor session:", error);
         return res.status(500).json({ error: "Failed to create visitor session" });
     }
+
+    console.log(`[start_visitor] ✅ Session created in DB: token=${token}, step=welcome, status=started`);
 
     return res.json({
         success: true,
@@ -51,6 +54,7 @@ export async function handleStart(req, res) {
     const verified_guest_count = 0;
     const requires_additional_guest = expected_guest_count > verified_guest_count;
 
+    console.log(`[start] Creating session in DB: token=${token}, property_external_id=${property_external_id || "none"}`);
     const { error } = await supabase.from("demo_sessions").insert({
         session_token: token,
         status: "started",
@@ -67,6 +71,8 @@ export async function handleStart(req, res) {
         console.error("Error creating session:", error);
         return res.status(500).json({ error: "Failed to create session" });
     }
+
+    console.log(`[start] ✅ Session created in DB: token=${token}, step=welcome, status=started`);
 
     return res.json({
         session_token: token,
@@ -119,6 +125,26 @@ export async function handleGetSession(req, res) {
     const expected = clampInt(session.expected_guest_count, 1, 10);
     const verified = clampInt(session.verified_guest_count, 0, 10);
 
+    const isVisitorSession =
+        session.flow_type === "visitor" ||
+        session.room_number === "VISITOR" ||
+        session.extracted_info?.type === "visitor";
+
+    const isGuestFinalized =
+        session.is_verified === true ||
+        session.current_step === "results" ||
+        session.status === "verified";
+
+    const sessionForClient = { ...session };
+    if (!isVisitorSession && !isGuestFinalized) {
+        sessionForClient.physical_room = null;
+        sessionForClient.room_access_code = null;
+        if ("room_type_name" in sessionForClient) sessionForClient.room_type_name = null;
+        if ("cloudbeds_check_in" in sessionForClient) sessionForClient.cloudbeds_check_in = null;
+        if ("cloudbeds_check_out" in sessionForClient) sessionForClient.cloudbeds_check_out = null;
+        if ("cloudbeds_guest_details" in sessionForClient) sessionForClient.cloudbeds_guest_details = null;
+    }
+
     const requires =
         session.requires_additional_guest === true
             ? true
@@ -145,7 +171,7 @@ export async function handleGetSession(req, res) {
     return res.json({
         success: true,
         session: {
-            ...session,
+            ...sessionForClient,
             current_step,
             expected_guest_count: expected,
             verified_guest_count: verified,
@@ -187,6 +213,8 @@ export async function handleLogConsent(req, res) {
         console.error("Error updating consent:", updateError);
         return res.status(500).json({ error: "Failed to log consent" });
     }
+
+    console.log(`[log_consent] ✅ Consent saved in DB: token=${session_token}, consent_given=${Boolean(consent_given)}, step=welcome`);
 
     return res.json({ success: true, message: "Consent logged successfully" });
 }

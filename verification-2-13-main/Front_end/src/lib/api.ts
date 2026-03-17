@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from "./storage";
+import { getApiBaseUrl, resetApiBaseUrl } from "./storage";
 
 /* ======================================================
    ACTION TYPES
@@ -272,6 +272,17 @@ export interface GuestVerification {
 ====================================================== */
 
 class ApiService {
+  private buildRequestInit(options: RequestInit | undefined, propertyHeaders: Record<string, string>): RequestInit {
+    return {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...propertyHeaders,
+        ...options?.headers,
+      },
+    };
+  }
+
   private async fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const baseUrl = getApiBaseUrl();
     const url = `${baseUrl}${endpoint}`;
@@ -293,14 +304,23 @@ class ApiService {
       }
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...propertyHeaders,
-        ...options?.headers,
-      },
-    });
+    let response: Response;
+    const requestInit = this.buildRequestInit(options, propertyHeaders);
+
+    try {
+      response = await fetch(url, requestInit);
+    } catch (err) {
+      const canFallbackToSameOrigin = Boolean(baseUrl) && endpoint.startsWith("/api/");
+      if (!canFallbackToSameOrigin) {
+        throw err;
+      }
+
+      console.warn(`[ApiService] Primary API URL failed (${baseUrl}). Retrying with same-origin ${endpoint}.`);
+
+      response = await fetch(endpoint, requestInit);
+      // The configured base URL is likely stale; reset to avoid repeated failures.
+      resetApiBaseUrl();
+    }
 
     const rawText = await response.text();
     console.log(`[ApiService] Response ${response.status}:`, rawText || "<empty>");

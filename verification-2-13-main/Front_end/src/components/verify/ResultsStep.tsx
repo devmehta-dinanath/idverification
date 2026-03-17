@@ -79,7 +79,14 @@ const ResultsStep = ({ data, onRetry, onHome }: Props) => {
 
   // If they typed OTA numeric ID, keep showing the booking ref (roomNumber)
   const displayedReservationRef =
-    data.roomNumber || anyData.booking_ref || anyData.bookingRef || anyData.room_number || "";
+    data.cloudbedsReservationId ||
+    anyData.cloudbeds_reservation_id ||
+    anyData.cloudbedsReservationId ||
+    data.roomNumber ||
+    anyData.booking_ref ||
+    anyData.bookingRef ||
+    anyData.room_number ||
+    "";
 
   const sessionToken = data.sessionToken;
   const wifiSsid = (data as any).wifiSsid || (anyData as any).wifi_ssid || null;

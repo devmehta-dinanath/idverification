@@ -295,6 +295,26 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
         (responseData as any).room_access_code ||
         (session as any)?.room_access_code;
 
+      const cloudbedsReservationId =
+        (response as any).cloudbeds_reservation_id ||
+        (responseData as any).cloudbeds_reservation_id ||
+        (session as any)?.cloudbeds_reservation_id;
+
+      const roomTypeName =
+        (response as any).room_type_name ||
+        (responseData as any).room_type_name ||
+        (session as any)?.room_type_name;
+
+      const checkIn =
+        (response as any).check_in ||
+        (responseData as any).check_in ||
+        (session as any)?.cloudbeds_check_in;
+
+      const checkOut =
+        (response as any).check_out ||
+        (responseData as any).check_out ||
+        (session as any)?.cloudbeds_check_out;
+
       // Update state with verified data (including visitor access code and Cloudbeds fields)
       updateData({
         selfieImage: optimizeResult.dataUrl,
@@ -310,6 +330,10 @@ const SelfieStep = ({ data, updateData, onNext, onNextGuest, onBack, onError }: 
         visitorAccessCode: visitorAccessCode || (session as any).visitor_access_code,
         physicalRoom,
         roomAccessCode,
+        cloudbedsReservationId,
+        roomTypeName,
+        checkIn,
+        checkOut,
       });
 
       // ROUTING based on authoritative session state
