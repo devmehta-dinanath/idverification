@@ -148,6 +148,7 @@ export interface VerifyResponse {
   verify_url?: string;
   message?: string;
   error?: string;
+  resolved_guest_name?: string;
 
   // verification results
   is_verified?: boolean;

@@ -182,11 +182,13 @@ export async function findReservationByReference(referenceId, propertyID = null)
  * @param {string} guestName
  * @param {string} bookingRef
  * @param {{ propertyID?: string }} [options]
- * @returns {{ found: true, propertyID, reservationId, guestName, adults, children, roomNumber, checkIn, checkOut, status } | { found: false }}
+ * @returns {{ found: true, propertyID, reservationId, guestName, adults, children, roomNumber, checkIn, checkOut, status } | { found: false, reason?: string, propertyID?: string, reservationId?: string, cloudbedsGuestName?: string }}
  */
 export async function lookupGuestReservation(guestName, bookingRef, options = {}) {
     const { normalizeGuestName } = await import("./utils.js");
     const guestNameNorm = normalizeGuestName(guestName);
+    let nameMismatchMatch = null;
+    let nameUnverifiableMatch = null;
 
     const explicitProperty = options?.propertyID && String(options.propertyID).trim();
     const propertyIdsToSearch = explicitProperty ? [explicitProperty] : PROPERTY_IDS;
@@ -222,14 +224,6 @@ export async function lookupGuestReservation(guestName, bookingRef, options = {}
 
             if (!resData) continue;
 
-            // 3. (Relaxed) name check – for this deployment we accept any reservation
-            // that matches the booking reference; we only log names for debugging.
-            const cbGuestName = `${resData.firstName || ""} ${resData.lastName || ""}`.trim();
-            const cbGuestNameNorm = normalizeGuestName(cbGuestName);
-            console.log(
-                `[cloudbeds] Using reservation ${resData.reservationID} on prop ${propertyID} for guest="${guestNameNorm}", Cloudbeds name="${cbGuestNameNorm}"`
-            );
-
             // Debug: log FULL raw resData to identify exactly which fields Cloudbeds returns
             console.log(`[cloudbeds] FULL resData for ${resData.reservationID}:`, JSON.stringify(resData, null, 2));
 
@@ -242,6 +236,53 @@ export async function lookupGuestReservation(guestName, bookingRef, options = {}
             const firstAssigned = assignedArr[0] || null;
             const guestRooms = mainGuest?.rooms || [];
             const firstGuestRoom = Array.isArray(guestRooms) ? guestRooms[0] : null;
+
+            const cbGuestNameCandidates = [
+                `${resData.firstName || ""} ${resData.lastName || ""}`.trim(),
+                `${mainGuest?.guestFirstName || ""} ${mainGuest?.guestLastName || ""}`.trim(),
+                `${mainGuest?.firstName || ""} ${mainGuest?.lastName || ""}`.trim(),
+                String(resData.guestName || "").trim(),
+                String(mainGuest?.guestName || "").trim(),
+                String(mainGuest?.name || "").trim(),
+            ].filter(Boolean);
+
+            const cbGuestNameNormCandidates = [...new Set(
+                cbGuestNameCandidates
+                    .map((name) => normalizeGuestName(name))
+                    .filter(Boolean)
+            )];
+
+            const canonicalCbGuestName = cbGuestNameCandidates[0] || "";
+
+            console.log(
+                `[cloudbeds] Using reservation ${resData.reservationID} on prop ${propertyID} for guest="${guestNameNorm}", Cloudbeds names=${JSON.stringify(cbGuestNameNormCandidates)}`
+            );
+
+            if (guestNameNorm) {
+                if (cbGuestNameNormCandidates.length === 0) {
+                    console.warn(
+                        `[cloudbeds] Name cannot be validated for reservation ${resData.reservationID} on prop ${propertyID}: no usable guest name fields from Cloudbeds`
+                    );
+                    nameUnverifiableMatch = {
+                        propertyID,
+                        reservationId: resData.reservationID,
+                    };
+                    continue;
+                }
+
+                const isNameMatch = cbGuestNameNormCandidates.includes(guestNameNorm);
+                if (!isNameMatch) {
+                    console.warn(
+                        `[cloudbeds] Name mismatch for reservation ${resData.reservationID} on prop ${propertyID}: entered="${guestNameNorm}", cloudbeds=${JSON.stringify(cbGuestNameNormCandidates)}`
+                    );
+                    nameMismatchMatch = {
+                        propertyID,
+                        reservationId: resData.reservationID,
+                        cloudbedsGuestName: canonicalCbGuestName,
+                    };
+                    continue;
+                }
+            }
 
             const roomNumber =
                 resData.roomNumber ||
@@ -290,7 +331,7 @@ export async function lookupGuestReservation(guestName, bookingRef, options = {}
                 found: true,
                 propertyID,
                 reservationId: resData.reservationID,
-                guestName: cbGuestName,
+                guestName: canonicalCbGuestName,
                 adults: Number(resData.adults || firstAssigned?.adults || 1),
                 children: Number(resData.children || firstAssigned?.children || 0),
                 roomNumber,
@@ -307,7 +348,26 @@ export async function lookupGuestReservation(guestName, bookingRef, options = {}
         }
     }
 
-    return { found: false };
+    if (nameMismatchMatch) {
+        return {
+            found: false,
+            reason: "name_mismatch",
+            propertyID: nameMismatchMatch.propertyID,
+            reservationId: nameMismatchMatch.reservationId,
+            cloudbedsGuestName: nameMismatchMatch.cloudbedsGuestName,
+        };
+    }
+
+    if (nameUnverifiableMatch) {
+        return {
+            found: false,
+            reason: "name_unverifiable",
+            propertyID: nameUnverifiableMatch.propertyID,
+            reservationId: nameUnverifiableMatch.reservationId,
+        };
+    }
+
+    return { found: false, reason: "reservation_not_found" };
 }
 
 /**

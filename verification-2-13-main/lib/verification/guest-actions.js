@@ -109,6 +109,20 @@ export async function handleUpdateGuest(req, res) {
     );
 
     if (!cbResult.found) {
+        if (cbResult.reason === "name_mismatch") {
+            return res.status(403).json({
+                code: "name_mismatch",
+                error: "Incorrect guest name. The name did not match the reservation in Cloudbeds. Please enter the exact name from your reservation.",
+            });
+        }
+
+        if (cbResult.reason === "name_unverifiable") {
+            return res.status(403).json({
+                code: "name_unverifiable",
+                error: "We could not verify the guest name from Cloudbeds for this reservation. Please enter the exact reservation holder name or contact reception.",
+            });
+        }
+
         return res.status(403).json({
             error: "Reservation not found. Please enter your name and reservation number exactly as shown in your confirmation email.",
         });
@@ -145,10 +159,11 @@ export async function handleUpdateGuest(req, res) {
     const expectedToSet = expectedOverride === null ? adultsFromCB : clampInt(expectedOverride, 1, 10);
 
     let physical_room = cbResult.roomName || cbResult.roomNumber || null;
+    const resolvedGuestName = (cbResult.guestName || guest_name || "").trim();
 
     // Core payload – only columns guaranteed to exist in the DB
     const updatePayload = {
-        guest_name,
+        guest_name: resolvedGuestName,
         room_number: cbResult.roomNumber || bookingValue,
         adults: adultsFromCB,
         children: childrenFromCB,
@@ -203,6 +218,7 @@ export async function handleUpdateGuest(req, res) {
 
     return res.json({
         success: true,
+        resolved_guest_name: resolvedGuestName,
         adults: adultsFromCB,
         children: childrenFromCB,
         expected_guest_count: expectedToSet,

@@ -47,6 +47,11 @@ const WelcomeStep = ({ data, updateData, onNext, onError }: Props) => {
         booking_ref: data.roomNumber, // using roomNumber field as booking ref for now
       } as any);
 
+      const resolvedGuestName = (res as any)?.resolved_guest_name;
+      if (typeof resolvedGuestName === "string" && resolvedGuestName.trim()) {
+        updateData({ guestName: resolvedGuestName.trim() });
+      }
+
       // Move forward only if save succeeded
       onNext();
     } catch (err) {
